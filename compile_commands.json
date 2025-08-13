@@ -1,0 +1,36 @@
+[
+  {
+    "arguments": [
+      "/usr/bin/g++",
+      "-c",
+      "-std=c++17",
+      "-Wall",
+      "-pthread",
+      "-I./include",
+      "-I./common",
+      "-o",
+      "server_app",
+      "server/ServerMain.cpp"
+    ],
+    "directory": "/home/eros/projects/magic",
+    "file": "/home/eros/projects/magic/server/ServerMain.cpp",
+    "output": "/home/eros/projects/magic/server_app"
+  },
+  {
+    "arguments": [
+      "/usr/bin/g++",
+      "-c",
+      "-std=c++17",
+      "-Wall",
+      "-pthread",
+      "-I./include",
+      "-I./common",
+      "-o",
+      "client_app",
+      "client/ClientMain.cpp"
+    ],
+    "directory": "/home/eros/projects/magic",
+    "file": "/home/eros/projects/magic/client/ClientMain.cpp",
+    "output": "/home/eros/projects/magic/client_app"
+  }
+]
