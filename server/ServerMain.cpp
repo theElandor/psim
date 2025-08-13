@@ -2,7 +2,6 @@
 #include <string>
 #include <vector>
 #include <memory>
-#include <unordered_map>
 #include <cstring>
 #include <array>
 #include <boost/asio.hpp>
@@ -129,23 +128,23 @@ private:
     }
 
     void start_read(std::shared_ptr<Player> player) {
-        if (!player->connected) return;
-
-        if (player->reading_header) {
-            // Read message length (4 bytes)
-            boost::asio::async_read(
-                player->socket,
-                boost::asio::buffer(&player->expected_message_length, sizeof(uint32_t)),
-                std::bind(&GameServer::handle_read_header, this, player, std::placeholders::_1, std::placeholders::_2)
-            );
-        } else {
-            // Read the actual message
-            boost::asio::async_read(
-                player->socket,
-                boost::asio::buffer(player->read_buffer.data(), player->expected_message_length),
-                std::bind(&GameServer::handle_read_body, this, player, std::placeholders::_1, std::placeholders::_2)
-            );
-        }
+      if (!player->connected) return;
+      if (player->reading_header) {
+        // Read message length (4 bytes)
+        boost::asio::async_read(
+          player->socket,
+          boost::asio::buffer(&player->expected_message_length, sizeof(uint32_t)),
+          std::bind(&GameServer::handle_read_header, this, player, std::placeholders::_1, std::placeholders::_2)
+        );
+      }
+      else {
+          // Read the actual message
+        boost::asio::async_read(
+          player->socket,
+          boost::asio::buffer(player->read_buffer.data(), player->expected_message_length),
+          std::bind(&GameServer::handle_read_body, this, player, std::placeholders::_1, std::placeholders::_2)
+        );
+      }
     }
 
     void handle_read_header(std::shared_ptr<Player> player, boost::system::error_code ec, std::size_t /*length*/) {
@@ -230,52 +229,66 @@ private:
         }
         std::cout << message << "\n";
     }
-    
     void send_message(std::shared_ptr<Player> player, const std::string& message) {
-        if (!player->connected) return;
-        
-        auto msg_copy = std::make_shared<std::string>(message);
-        uint32_t len = htonl(static_cast<uint32_t>(message.size()));
-        
-        auto len_buffer = std::make_shared<std::array<char, sizeof(uint32_t)>>();
-        std::memcpy(len_buffer->data(), &len, sizeof(uint32_t));
-        
-        std::vector<boost::asio::const_buffer> buffers;
-        buffers.push_back(boost::asio::buffer(*len_buffer));
-        buffers.push_back(boost::asio::buffer(*msg_copy));
-        
-        boost::asio::async_write(player->socket, buffers,
-            [this, player, msg_copy, len_buffer](boost::system::error_code ec, std::size_t length) {
-                if (ec) {
-                    handle_disconnect(player, ec);
-                }
-            });
+      /*
+       * Sends a message asyncronously to a target player.
+       */
+      if (!player->connected) return;
+      
+      auto msg_copy = std::make_shared<std::string>(message);
+      uint32_t len = htonl(static_cast<uint32_t>(message.size()));
+      
+      auto len_buffer = std::make_shared<std::array<char, sizeof(uint32_t)>>();
+      std::memcpy(len_buffer->data(), &len, sizeof(uint32_t));
+      
+      std::vector<boost::asio::const_buffer> buffers;
+      buffers.push_back(boost::asio::buffer(*len_buffer));
+      buffers.push_back(boost::asio::buffer(*msg_copy));
+      
+      boost::asio::async_write(player->socket, buffers,
+        [this, player, msg_copy, len_buffer](boost::system::error_code ec, std::size_t length) {
+          if (ec) { // if error during sending...
+            handle_disconnect(player, ec);
+          }
+        });
     }
     
     void broadcast_message(const std::string& message) {
-        for (auto& player : players) {
-            if (player->connected) {
-                send_message(player, message);
-            }
-        }
+      /*
+       * Sends a message (string) to every player.
+       */
+      for (auto& player : players) {
+          if (player->connected) {
+              send_message(player, message);
+          }
+      }
     }
     
     void send_player_info(std::shared_ptr<Player> player) {
+        /*
+         * Sends private information to target player.
+         * */
         nlohmann::json j;
         j["player_id"] = player->info.player_id;
         j["hand_cards"] = player->info.hand_cards;
         send_message(player, j.dump());
     }
     
-    void send_game_state(std::shared_ptr<Player> player) {
-        nlohmann::json j;
-        j["turn"] = game_state.turn;
-        j["priority"] = game_state.priority;
-        j["life_points"] = game_state.life_points;
-        send_message(player, j.dump());
+    void send_game_state(std::shared_ptr<Player> player) { 
+      /*
+       * Sends game state to target player.
+       * */
+      nlohmann::json j;
+      j["turn"] = game_state.turn;
+      j["priority"] = game_state.priority;
+      j["life_points"] = game_state.life_points;
+      send_message(player, j.dump());
     }
     
     void broadcast_game_state() {
+      /*
+       * Sends game state to all players.
+       * */
         for (auto& player : players) {
             if (player->connected) {
                 send_game_state(player);
@@ -283,18 +296,24 @@ private:
         }
     }
     
-    void send_available_commands(std::shared_ptr<Player> player) {
-        std::vector<CommandCode> commands {CommandCode::PlayCard, CommandCode::PassPriority};
-        nlohmann::json j = serializeCommandCodeVector(commands);
-        send_message(player, j.dump());
+    void send_available_commands(std::shared_ptr<Player> player) { 
+      /*
+       * Sends available commands to target player.
+       */
+      std::vector<CommandCode> commands {CommandCode::PlayCard, CommandCode::PassPriority};
+      nlohmann::json j = serializeCommandCodeVector(commands);
+      send_message(player, j.dump());
     }
     
-    void notify_priority_player() {
-        if (game_state.priority < players.size() && players[game_state.priority]->connected) {
-            send_available_commands(players[game_state.priority]);
-            send_message(players[game_state.priority], "You have priority");
-            std::cout << "Player " << game_state.priority << " now has priority.\n";
-        }
+    void notify_priority_player() { 
+      /*
+       * Sends a priority acquired notification to the player with priority.
+       * */
+      if (game_state.priority < players.size() && players[game_state.priority]->connected) {
+          send_available_commands(players[game_state.priority]);
+          send_message(players[game_state.priority], "You have priority");
+          std::cout << "Player " << game_state.priority << " now has priority.\n";
+      }
     }
 };
 
