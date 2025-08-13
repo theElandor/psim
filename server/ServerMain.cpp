@@ -49,7 +49,8 @@ void sendAvailableCommands(tcp::socket &socket){
     // available commands depend on the game state itself.
     // for now, play card and pass priority are available. 
     std::vector<CommandCode> commands {CommandCode::PlayCard, CommandCode::PassPriority};
-    std::string msg = serializeCommandCodeVector(commands);
+    std::string msg = serializeCommandCodeVector(commands).dump();
+    std::cout<<msg<<std::endl;
     sendMessage(socket, msg);
 }
 std::string receiveCommand(tcp::socket& socket) {
@@ -99,24 +100,25 @@ int main() {
         std::cout << "Player " << g.priority << " now has priority." << "\n"; 
         // Main server loop - wait for commands from the player with priority
         while (true) {
-            try {
-                // first, send available commands to player with priority.
+            try { // send available commands
                 sendAvailableCommands(players[g.priority]);
-                std::cout<<"Sent commands"<<std::endl;
-                std::string command = receiveCommand(players[g.priority]);
-                std::cout << "Received command from player " << g.priority << ": " << command << "\n";
-                std::string ans = handle_command(command, players, g);
-                std::cout<<ans<<std::endl;
-                sendMessage(players[g.priority], ans);
-                // Example: if command is "quit", break the loop
-                if (command == "quit") {
-                    std::cout << "Player " << g.priority << " quit the game.\n";
-                    break;
-                } 
-                // TODO: Add game logic to process commands and potentially change priority
-                
             } catch (std::exception& e) {
-                std::cerr << "Error receiving command: " << e.what() << "\n";
+                std::cerr << "Error sending commands: " << e.what() << "\n";
+                break;
+            }
+            try{ // receive command from player
+              std::string command = receiveCommand(players[g.priority]);
+              std::cout << "Received command from player " << g.priority << ": " << command << "\n";
+              std::string ans = handle_command(command, players, g);
+              std::cout<<ans<<std::endl;
+              sendMessage(players[g.priority], ans);
+              // Example: if command is "quit", break the loop
+              if (command == "quit") {
+                  std::cout << "Player " << g.priority << " quit the game.\n";
+                  break;
+              }  
+            } catch(std::exception& e){
+                std::cerr << "Error receiving command.: " << e.what() << "\n";
                 break;
             }
         }

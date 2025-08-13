@@ -7,7 +7,7 @@
 #include "Card.hpp"
 #include "PlayerInfo.hpp"
 #include "sprites.hpp"
-#include "command.hpp"
+#include "Command.hpp"
 
 using boost::asio::ip::tcp;
 using json = nlohmann::json;
@@ -30,9 +30,11 @@ GameState deserializeGameState(const std::string& json_str){
     g.life_points = j["life_points"].get<std::pair<int,int>>(); 
     return g;
 }
-vector<CommandCode> deserializeAvailableCodes(const std::string &json_str){
+
+std::vector<CommandCode> deserializeAvailableCodes(const std::string &json_str){
     json j = json::parse(json_str);
-    vector<CommandCode> commands;
+    std::vector<CommandCode> commands;
+    std::cout<<"Deserializing codes..."<<std::endl;
     commands.reserve(j.size());
 
     for (const auto& item : j) {
@@ -64,7 +66,8 @@ void sendCommand(tcp::socket& socket, const std::string& command) {
     boost::asio::write(socket, buffers);
 }
 
-PlayerInfo receivePlayerInfo(tcp::socket& socket) {
+template <typename T>
+T receiveAndDeserialize(tcp::socket& socket, T(*deserializer)(const std::string&)) {
     uint32_t len_net;
     boost::asio::read(socket, boost::asio::buffer(&len_net, sizeof(len_net)));
     uint32_t len = ntohl(len_net);
@@ -73,21 +76,17 @@ PlayerInfo receivePlayerInfo(tcp::socket& socket) {
     boost::asio::read(socket, boost::asio::buffer(buf.data(), len));
 
     std::string json_str(buf.begin(), buf.end());
-    return deserializePlayerInfo(json_str);
+    return deserializer(json_str);
+}
+
+PlayerInfo receivePlayerInfo(tcp::socket& socket) {
+  return receiveAndDeserialize(socket, deserializePlayerInfo);
 }
 GameState receiveGameState(tcp::socket &socket){
-    uint32_t len_net;
-    boost::asio::read(socket, boost::asio::buffer(&len_net, sizeof(len_net)));
-    uint32_t len = ntohl(len_net);
-
-    std::vector<char> buf(len);
-    boost::asio::read(socket, boost::asio::buffer(buf.data(), len));
-
-    std::string json_str(buf.begin(), buf.end());
-    return deserializeGameState(json_str);
+  return receiveAndDeserialize(socket, deserializeGameState);
 }
-vector<CommandCode> receiveCommandCode(tcp::socket &socket){
-    
+std::vector<CommandCode> receiveAvailableCodes(tcp::socket &socket){
+  return receiveAndDeserialize(socket, deserializeAvailableCodes);
 }
 int main() {
     try {
@@ -116,7 +115,10 @@ int main() {
             
             // Main command loop
             while (true) {
-
+                // first receive available codes:
+                std::cout<<"Available codes"<<std::endl;
+                std::vector<CommandCode> codes = receiveAvailableCodes(socket);
+                print_commands(codes);
                 std::cout << "> ";
                 std::string command;
                 std::getline(std::cin, command);

@@ -1,6 +1,6 @@
+#pragma once
 #include <string>
 #include <nlohmann/json.hpp>
-#include <iostream>
 
 enum class CommandCode {
     PlayCard,
@@ -22,12 +22,13 @@ inline CommandCode commandCodeFromString(const std::string& str) {
     if (str == "PassPriority") return CommandCode::PassPriority;
     return CommandCode::Unknown;
 }
+
 inline nlohmann::json serializeCommandCodeVector(const std::vector<CommandCode>& codes) {
     nlohmann::json j = nlohmann::json::array();
-    for (auto code : codes) {
+    for (const auto& code : codes) {
         j.push_back(commandCodeToString(code));
     }
-    return j;
+    return j; // returns a JSON array
 }
 
 class Command {

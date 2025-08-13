@@ -1,10 +1,17 @@
-#include "Card.hpp"
-#include <vector>
+#include <iostream>
 #include <string>
+#include <vector>
+#include "Card.hpp"
+#include "Command.hpp"
 // AI generated
 std::string fitString(const std::string& str, size_t n) {
     if (str.size() > n) return str.substr(0, n-3) + "...";
-    return str + std::string(n - str.size(), ' ');
+    return str + std::string(n - str.size(), ' '); 
+}
+void print_commands(const std::vector<CommandCode> &codes){
+  for(auto &p:codes){
+    std::cout<<"-> "<<commandCodeToString(p)<<std::endl;
+  }
 }
 void display_cards(const std::vector<Card>& hand) {
     const int width = 20;  // card width
