@@ -7,6 +7,7 @@
 #include "Card.hpp"
 #include "PlayerInfo.hpp"
 #include "sprites.hpp"
+#include "command.hpp"
 
 using boost::asio::ip::tcp;
 using json = nlohmann::json;
@@ -28,6 +29,20 @@ GameState deserializeGameState(const std::string& json_str){
     g.priority = j["priority"];
     g.life_points = j["life_points"].get<std::pair<int,int>>(); 
     return g;
+}
+vector<CommandCode> deserializeAvailableCodes(const std::string &json_str){
+    json j = json::parse(json_str);
+    vector<CommandCode> commands;
+    commands.reserve(j.size());
+
+    for (const auto& item : j) {
+        if (item.is_string()) {
+            commands.push_back(commandCodeFromString(item.get<std::string>()));
+        } else {
+            commands.push_back(CommandCode::Unknown);
+        }
+    }
+    return commands;
 }
 
 std::string receiveMessage(tcp::socket& socket) {
@@ -71,6 +86,9 @@ GameState receiveGameState(tcp::socket &socket){
     std::string json_str(buf.begin(), buf.end());
     return deserializeGameState(json_str);
 }
+vector<CommandCode> receiveCommandCode(tcp::socket &socket){
+    
+}
 int main() {
     try {
         boost::asio::io_context io;
@@ -98,6 +116,7 @@ int main() {
             
             // Main command loop
             while (true) {
+
                 std::cout << "> ";
                 std::string command;
                 std::getline(std::cin, command);

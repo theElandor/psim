@@ -7,6 +7,7 @@
 #include "GameState.hpp" 
 #include "Card.hpp"
 #include "PlayerInfo.hpp"
+#include "Command.hpp"
 #define PORT 5000
 
 using boost::asio::ip::tcp;
@@ -44,7 +45,13 @@ void sendGameState(tcp::socket& socket, const GameState& g) {
     std::string msg = serializeGameState(g);
     sendMessage(socket, msg);
 }
-
+void sendAvailableCommands(tcp::socket &socket){
+    // available commands depend on the game state itself.
+    // for now, play card and pass priority are available. 
+    std::vector<CommandCode> commands {CommandCode::PlayCard, CommandCode::PassPriority};
+    std::string msg = serializeCommandCodeVector(commands);
+    sendMessage(socket, msg);
+}
 std::string receiveCommand(tcp::socket& socket) {
     uint32_t len;
     boost::asio::read(socket, boost::asio::buffer(&len, sizeof(len)));
@@ -89,11 +96,13 @@ int main() {
             sendGameState(players[i], g); 
         }
         sendMessage(players[g.priority], "You have priority");
-        std::cout << "Player " << g.priority << " now has priority." << "\n";
-        
+        std::cout << "Player " << g.priority << " now has priority." << "\n"; 
         // Main server loop - wait for commands from the player with priority
         while (true) {
             try {
+                // first, send available commands to player with priority.
+                sendAvailableCommands(players[g.priority]);
+                std::cout<<"Sent commands"<<std::endl;
                 std::string command = receiveCommand(players[g.priority]);
                 std::cout << "Received command from player " << g.priority << ": " << command << "\n";
                 std::string ans = handle_command(command, players, g);
@@ -103,8 +112,7 @@ int main() {
                 if (command == "quit") {
                     std::cout << "Player " << g.priority << " quit the game.\n";
                     break;
-                }
-                
+                } 
                 // TODO: Add game logic to process commands and potentially change priority
                 
             } catch (std::exception& e) {
