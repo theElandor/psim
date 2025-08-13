@@ -56,38 +56,52 @@ public:
     }
     
 private:
+
     void accept_connections() {
+        /*
+          Function called as the server starts.
+          The acceptor waits for async connections.
+          When a client connects, the connection is handled
+          by the "handle_accept()" function, wrapped around the "async_accept()"
+          method of the acceptor.
+         */
         if (connected_players >= 2) return;
-        
         auto new_player = std::make_shared<Player>(io_context, connected_players);
-        
-        acceptor.async_accept(new_player->socket,
-            [this, new_player](boost::system::error_code ec) {
-                if (!ec) {
-                    new_player->connected = true;
-                    players.push_back(new_player);
-                    connected_players++;
-                    
-                    std::cout << "Player " << new_player->id << " connected.\n";
-                    
-                    // Initialize player info
-                    initialize_player_info(*new_player);
-                    
-                    // Start reading from this player
-                    start_read(new_player);
-                    
-                    if (connected_players < 2) {
-                        accept_connections(); // Accept next player
-                    } else {
-                        start_game();
-                    }
-                } else {
-                    std::cerr << "Accept error: " << ec.message() << "\n";
-                }
-            });
+        acceptor.async_accept(
+          new_player->socket,
+          std::bind(&GameServer::handle_accept, this, new_player, std::placeholders::_1)
+        );
+    }
+
+    void handle_accept(std::shared_ptr<Player> new_player,boost::system::error_code ec) {
+      /*
+        This function initializes some player specific information.
+        Then if the game needs one more player, the "accept_connections()" loop
+        is triggered again. Otherwise the game can start.
+        This function also starts the loop that waits for that specific
+        player commands.
+       */
+      if (!ec) {
+        new_player->connected = true;
+        players.push_back(new_player);
+        connected_players++;
+        std::cout << "Player " << new_player->id << " connected.\n";
+        // Initialize player info
+        initialize_player_info(*new_player);
+        // Start reading from this player
+        start_read(new_player);
+        if (connected_players < 2) {
+            accept_connections(); // Accept next player
+        } else {
+          start_game();
+        }
+      } else {
+        std::cerr << "Accept error: " << ec.message() << "\n";
+      }
     }
     
     void initialize_player_info(Player& player) {
+      // Just initializes some player information.
         Card Forest("Forest", "");
         Card Mountain("Mountain", "");
         Card LlanowarElves("Llanowar elves", "Tap to add 1 green");
@@ -100,68 +114,72 @@ private:
     }
     
     void start_game() {
+        /*
+         * Function that broadcasts starting information
+         * to all players.
+         **/
         if (game_started) return;
-        game_started = true;
-        
+        game_started = true; 
         std::cout << "Game starting!\n";
-        
-        // Send initial game state to all players
         broadcast_game_state();
-        
-        // Send private info to each player
         for (auto& player : players) {
             send_player_info(player);
         }
-        
-        // Notify priority player
         notify_priority_player();
     }
-    
+
     void start_read(std::shared_ptr<Player> player) {
         if (!player->connected) return;
-        
+
         if (player->reading_header) {
             // Read message length (4 bytes)
-            boost::asio::async_read(player->socket,
+            boost::asio::async_read(
+                player->socket,
                 boost::asio::buffer(&player->expected_message_length, sizeof(uint32_t)),
-                [this, player](boost::system::error_code ec, std::size_t length) {
-                    if (!ec) {
-                        player->expected_message_length = ntohl(player->expected_message_length);
-                        player->reading_header = false;
-                        start_read(player); // Read the actual message
-                    } else {
-                        handle_disconnect(player, ec);
-                    }
-                });
+                std::bind(&GameServer::handle_read_header, this, player, std::placeholders::_1, std::placeholders::_2)
+            );
         } else {
             // Read the actual message
-            boost::asio::async_read(player->socket,
+            boost::asio::async_read(
+                player->socket,
                 boost::asio::buffer(player->read_buffer.data(), player->expected_message_length),
-                [this, player](boost::system::error_code ec, std::size_t length) {
-                    if (!ec) {
-                        std::string command(player->read_buffer.begin(), 
-                                          player->read_buffer.begin() + player->expected_message_length);
-                        handle_command(player, command);
-                        
-                        // Reset for next message
-                        player->reading_header = true;
-                        start_read(player); // Continue reading
-                    } else {
-                        handle_disconnect(player, ec);
-                    }
-                });
+                std::bind(&GameServer::handle_read_body, this, player, std::placeholders::_1, std::placeholders::_2)
+            );
         }
     }
-    
+
+    void handle_read_header(std::shared_ptr<Player> player, boost::system::error_code ec, std::size_t /*length*/) {
+        if (!ec) {
+            player->expected_message_length = ntohl(player->expected_message_length);
+            player->reading_header = false;
+            start_read(player); // Proceed to read the body
+        } else {
+            handle_disconnect(player, ec);
+        }
+    }
+
+    void handle_read_body(std::shared_ptr<Player> player, boost::system::error_code ec, std::size_t /*length*/) {
+        if (!ec) {
+            std::string command(
+                player->read_buffer.begin(),
+                player->read_buffer.begin() + player->expected_message_length
+            );
+            handle_command(player, command);
+            // Reset for next message
+            player->reading_header = true;
+            start_read(player); // Continue reading
+        } else {
+            handle_disconnect(player, ec);
+        }
+    }
+
     void handle_disconnect(std::shared_ptr<Player> player, boost::system::error_code ec) {
         if (player->connected) {
             std::cout << "Player " << player->id << " disconnected: " << ec.message() << "\n";
             player->connected = false;
             connected_players--;
-            
             // Notify other players about disconnection
             broadcast_message("Player " + std::to_string(player->id) + " has left the game");
-            
             // Handle game state changes due to disconnection
             handle_player_resignation(player);
         }
@@ -169,23 +187,19 @@ private:
     
     void handle_command(std::shared_ptr<Player> player, const std::string& command) {
         std::cout << "Received command from player " << player->id << ": " << command << "\n";
-        
         // Allow quit/resign at any time, regardless of priority
         if (command == "quit" || command == "resign") {
             handle_player_resignation(player);
             return;
         }
-        
         // For other commands, check if it's this player's priority
         if (player->id != game_state.priority) {
             send_message(player, "It's not your turn! You can only quit/resign when it's not your turn.");
             return;
         }
-        
         // Process the command for the player with priority
         std::string response = process_game_command(player, command);
         send_message(player, response);
-        
         // Update game state and notify all players if needed
         broadcast_game_state();
         notify_priority_player();
@@ -199,14 +213,12 @@ private:
             game_state.priority = (game_state.priority + 1) % 2;
             return "Priority passed";
         }
-        
         return "Command processed: " + command;
     }
     
     void handle_player_resignation(std::shared_ptr<Player> player) {
         std::string message = "Player " + std::to_string(player->id) + " has resigned. Game over.";
         broadcast_message(message);
-        
         // Close all connections and stop the server
         for (auto& p : players) {
             if (p->connected && p != player) {
@@ -216,7 +228,6 @@ private:
                 p->connected = false;
             }
         }
-        
         std::cout << message << "\n";
     }
     
@@ -291,15 +302,11 @@ int main() {
     try {
         boost::asio::io_context io;
         GameServer server(io);
-        
         server.start();
-        
         // Run the io_context
         io.run();
-        
     } catch (std::exception& e) {
         std::cerr << "Server exception: " << e.what() << "\n";
     }
-    
     return 0;
 }
