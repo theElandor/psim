@@ -106,19 +106,19 @@ private:
   }
     
   void initialize_player_info(Player& player) {
-    // different cards are initialized for each player.
+    // Just initializes some player information.
     Card Forest_0("Forest", "", 0);
     Card Mountain_0("Mountain", "",1);
     Card LlanowarElves_0("Llanowar elves", "Tap to add 1 green", 2);
 
-    Card Forest_1("Forest", "", 3);
-    Card Mountain_1("Mountain", "",4);
-    Card LlanowarElves_1("Llanowar elves", "Tap to add 1 green", 5);
+    Card Forest_0("Forest", "", 0);
+    Card Mountain_0("Mountain", "",1);
+    Card LlanowarElves_0("Llanowar elves", "Tap to add 1 green", 2);
     
     if (player.id == 0) {
-        player.info = {0, {Forest_0, Mountain_0, Forest_0}};
+        player.info = {0, {Forest, Mountain, Forest}};
     } else {
-        player.info = {1, {LlanowarElves_1, Forest_1}};
+        player.info = {1, {LlanowarElves, Forest}};
     }
   }
     

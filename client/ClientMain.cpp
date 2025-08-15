@@ -3,16 +3,15 @@
 #include <vector>
 #include <memory>
 #include <thread>
-#include <chrono>
 #include <cstring>
 #include <array>
 #include <boost/asio.hpp>
 #include <nlohmann/json.hpp>
 #include "GameState.hpp" 
-#include "Card.hpp"
 #include "PlayerInfo.hpp"
 #include "sprites.hpp"
 #include "Command.hpp"
+#include "Deserializers.hpp"
 
 using boost::asio::ip::tcp;
 using json = nlohmann::json;
@@ -31,13 +30,12 @@ private:
     std::vector<CommandCode> available_commands;
     
 public:
-
 GameClient(boost::asio::io_context& io) 
     : io_context(io), socket(io), connected(false), 
       expected_message_length(0), reading_header(true), has_priority(false) {
     read_buffer.resize(65536); // 64KB buffer
 }
-    
+ 
 void connect_to_server(const std::string& host, int port) {
     // just a symple async connection.
     auto endpoint = tcp::endpoint(boost::asio::ip::make_address(host), port); 
@@ -54,6 +52,7 @@ void connect_to_server(const std::string& host, int port) {
 }
     
 void send_command(const std::string& command) {
+  // symple async send of a command string.
   if (!connected) {
       std::cout << "Not connected to server!\n";
       return;
@@ -115,159 +114,136 @@ void start_input_loop() {
 }
  
 private:
-    void start_read() {
-        if (!connected) return;
-        if (reading_header) {
-            // Read message length (4 bytes)
-            boost::asio::async_read(socket,
-                boost::asio::buffer(&expected_message_length, sizeof(uint32_t)),
-                [this](boost::system::error_code ec, std::size_t length) {
-                    if (!ec) {
-                        expected_message_length = ntohl(expected_message_length);
-                        reading_header = false;
-                        start_read(); // Read the actual message
-                    } else {
-                        handle_disconnect();
-                    }
-                });
+void start_read() {
+  // TODO: check if this can be factored out
+  // and if we can make a single function for both
+  // server and client.
+  if (!connected) return;
+  if (reading_header) {
+      // Read message length (4 bytes)
+    boost::asio::async_read(socket,
+      boost::asio::buffer(&expected_message_length, sizeof(uint32_t)),
+      [this](boost::system::error_code ec, std::size_t length) {
+        if (!ec) {
+            expected_message_length = ntohl(expected_message_length);
+            reading_header = false;
+            start_read(); // Read the actual message
         } else {
-            // Read the actual message
-            boost::asio::async_read(socket,
-                boost::asio::buffer(read_buffer.data(), expected_message_length),
-                [this](boost::system::error_code ec, std::size_t length) {
-                    if (!ec) {
-                        std::string message(read_buffer.begin(), 
-                                          read_buffer.begin() + expected_message_length);
-                        handle_message(message);
-                        
-                        // Reset for next message
-                        reading_header = true;
-                        start_read(); // Continue reading
-                    } else {
-                        handle_disconnect();
-                    }
-                });
-        }
-    }
-    
-    void handle_message(const std::string& message) {
-        try {
-            // Try to parse as JSON first
-            nlohmann::json j = nlohmann::json::parse(message);
-            
-            // Check if it's player info
-            if (j.contains("player_id") && j.contains("hand_cards")) {
-                player_info = deserialize_player_info(message);
-                display_player_info();
-                return;
-            }
-            
-            // Check if it's game state
-            if (j.contains("turn") && j.contains("priority") && j.contains("life_points")) {
-                game_state = deserialize_game_state(message);
-                display_game_state();
-                check_priority();
-                return;
-            }
-            
-            // Check if it's available commands
-            if (j.is_array()) {
-                available_commands = deserialize_available_codes(message);
-                display_available_commands();
-                return;
-            }
-            
-        } catch (const nlohmann::json::parse_error&) {
-            // Not JSON, treat as plain text message
-        }
-        
-        // Handle plain text messages
-        std::cout << "\n" << message << "\n";
-        
-        if (message == "You have priority") {
-            has_priority = true;
-            std::cout << "You can now enter commands!\n";
-        } else if (message.find("has left the game") != std::string::npos ||
-                   message.find("has resigned") != std::string::npos ||
-                   message.find("Game over") != std::string::npos) {
-            std::cout << "Game ended.\n";
-            connected = false;
-        }
-    }
-    
-    void handle_disconnect() {
-        if (connected) {
-            std::cout << "\nDisconnected from server.\n";
-            connected = false;
-            try {
-                socket.close();
-            } catch (...) {}
-        }
-    }
-    
-    void display_player_info() {
-        std::cout << "\n--- Private Information ---\n";
-        std::cout << "Player ID: " << player_info.player_id << "\n";
-        display_cards(player_info.hand_cards);
-    }
-    
-    void display_game_state() {
-        std::cout << "\n--- Global Information ---\n";
-        std::cout << "Life points: " << game_state.life_points.first 
-                  << " " << game_state.life_points.second << "\n";
-        std::cout << "Turn: " << game_state.turn << std::endl;
-        std::cout << "Priority: " << game_state.priority << std::endl;
-    }
-    
-    void display_available_commands() {
-        std::cout << "\nAvailable commands:\n";
-        print_commands(available_commands);
-    }
-    
-    void check_priority() {
-        bool new_priority = (player_info.player_id == game_state.priority);
-        if (new_priority != has_priority) {
-            has_priority = new_priority;
-            if (!has_priority) {
-                std::cout << "\nWaiting for the other player to make their move... (you can still type 'quit' or 'resign')\n";
-            }
-        }
-    }
-    
-    // Helper functions for deserialization
-    PlayerInfo deserialize_player_info(const std::string& json_str) {
-        nlohmann::json j = nlohmann::json::parse(json_str);
-        PlayerInfo p;
-        p.player_id = j["player_id"];
-        p.hand_cards = j["hand_cards"].get<std::vector<Card>>();
-        return p;
-    }
-    
-    GameState deserialize_game_state(const std::string& json_str) {
-        nlohmann::json j = nlohmann::json::parse(json_str);
-        GameState g;
-        g.turn = j["turn"];
-        g.priority = j["priority"];
-        g.life_points = j["life_points"].get<std::pair<int,int>>();
-        return g;
-    }
-    
-    std::vector<CommandCode> deserialize_available_codes(const std::string& json_str) {
-        nlohmann::json j = nlohmann::json::parse(json_str);
-        std::vector<CommandCode> commands;
-        commands.reserve(j.size());
-        
-        for (const auto& item : j) {
-            if (item.is_string()) {
-                commands.push_back(commandCodeFromString(item.get<std::string>()));
+            handle_disconnect();
+          }
+        });
+    } else {
+      // Read the actual message
+      boost::asio::async_read(socket,
+        boost::asio::buffer(read_buffer.data(), expected_message_length),
+        [this](boost::system::error_code ec, std::size_t length) {
+            if (!ec) {
+              std::string message(read_buffer.begin(), 
+                                read_buffer.begin() + expected_message_length);
+              handle_message(message); 
+              // Reset for next message
+              reading_header = true;
+              start_read(); // Continue reading
             } else {
-                commands.push_back(CommandCode::Unknown);
+                handle_disconnect();
             }
-        }
-        return commands;
+          });
     }
-};
+}
+    
+void handle_message(const std::string& message) {
+    /*
+    * Main logic of message reception from the server.
+    * Currently supporting the following messages:
+    * 1) Player's private information (JSON)
+    * 2) Shared global game state (JSON)
+    * 3) Set of available commands (JSON)
+    * 4) String messages (str)
+    */    
+    try {
+        // Try to parse as JSON first
+        nlohmann::json j = nlohmann::json::parse(message);
+        
+        // Check if it's player info
+        if (j.contains("player_id") && j.contains("hand_cards")) {
+          player_info = deserialize_player_info(message);
+          display_player_info();
+          return;
+        }
+        
+        // Check if it's game state
+        if (j.contains("turn") && j.contains("priority") && j.contains("life_points")) {
+          game_state = deserialize_game_state(message);
+          display_game_state();
+          check_priority();
+          return;
+        }
+        
+        // Check if it's available commands
+        if (j.is_array()) {
+          available_commands = deserialize_available_codes(message);
+          display_available_commands();
+          return;
+        }
+        
+    } catch (const nlohmann::json::parse_error&) {
+        // Not JSON, treat as plain text message
+    }
+    
+    // Handle plain text messages
+    std::cout << "\n" << message << "\n";
+    
+    if (message == "You have priority") {
+        has_priority = true;
+        std::cout << "You can now enter commands!\n";
+    } else if (message.find("has left the game") != std::string::npos ||
+               message.find("has resigned") != std::string::npos ||
+               message.find("Game over") != std::string::npos) {
+        std::cout << "Game ended.\n";
+        connected = false;
+    }
+}
+    
+void handle_disconnect() {
+  // Handles disconnection of the current client.
+  if (connected) {
+    std::cout << "\nDisconnected from server.\n";
+    connected = false;
+    try {
+        socket.close();
+    } catch (...) {}
+  }
+}
+            
+void check_priority() {
+  bool new_priority = (player_info.player_id == game_state.priority);
+  if (new_priority != has_priority) {
+      has_priority = new_priority;
+      if (!has_priority) {
+          std::cout << "\nWaiting...(you can still type 'quit' or 'resign')\n";
+      }
+  }
+}
 
+void display_player_info() {
+  std::cout << "\n--- Private Information ---\n";
+  std::cout << "Player ID: " << player_info.player_id << "\n";
+  display_cards(player_info.hand_cards);
+}
+    
+void display_game_state() {
+  std::cout << "\n--- Global Information ---\n";
+  std::cout << "Life points: " << game_state.life_points.first 
+            << " " << game_state.life_points.second << "\n";
+  std::cout << "Turn: " << game_state.turn << std::endl;
+  std::cout << "Priority: " << game_state.priority << std::endl;
+}
+
+void display_available_commands() {
+  std::cout << "\nAvailable commands:\n";
+  print_commands(available_commands);
+}
+};
 int main() {
     try {
         boost::asio::io_context io;
