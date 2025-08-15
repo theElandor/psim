@@ -31,93 +31,92 @@ private:
     std::vector<CommandCode> available_commands;
     
 public:
-    GameClient(boost::asio::io_context& io) 
-        : io_context(io), socket(io), connected(false), 
-          expected_message_length(0), reading_header(true), has_priority(false) {
-        read_buffer.resize(65536); // 64KB buffer
-    }
+
+GameClient(boost::asio::io_context& io) 
+    : io_context(io), socket(io), connected(false), 
+      expected_message_length(0), reading_header(true), has_priority(false) {
+    read_buffer.resize(65536); // 64KB buffer
+}
     
-    void connect_to_server(const std::string& host, int port) {
-        auto endpoint = tcp::endpoint(boost::asio::ip::make_address(host), port);
-        
-        socket.async_connect(endpoint,
-            [this](boost::system::error_code ec) {
-                if (!ec) {
-                    connected = true;
-                    std::cout << "Connected to server.\n";
-                    start_read();
-                } else {
-                    std::cerr << "Connection failed: " << ec.message() << "\n";
-                }
-            });
-    }
-    
-    void send_command(const std::string& command) {
-        if (!connected) {
-            std::cout << "Not connected to server!\n";
-            return;
-        }
-        
-        auto msg_copy = std::make_shared<std::string>(command);
-        uint32_t len = htonl(static_cast<uint32_t>(command.size()));
-        
-        auto len_buffer = std::make_shared<std::array<char, sizeof(uint32_t)>>();
-        std::memcpy(len_buffer->data(), &len, sizeof(uint32_t));
-        
-        std::vector<boost::asio::const_buffer> buffers;
-        buffers.push_back(boost::asio::buffer(*len_buffer));
-        buffers.push_back(boost::asio::buffer(*msg_copy));
-        
-        boost::asio::async_write(socket, buffers,
-            [this, msg_copy, len_buffer, command](boost::system::error_code ec, std::size_t length) {
-                if (!ec) {
-                    std::cout << "Command sent: " << command << "\n";
-                } else {
-                    std::cerr << "Send error: " << ec.message() << "\n";
-                    handle_disconnect();
-                }
-            });
-    }
-    
-    void start_input_loop() {
-        // Run input loop in a separate thread
-        std::thread input_thread([this]() {
-            std::string command;
-            while (connected) {
-                // Always show prompt if connected, but indicate priority status
-                if (has_priority) {
-                    std::cout << "\n[YOUR TURN] > ";
-                } else {
-                    std::cout << "\n[WAITING] (type 'quit' or 'resign' to leave) > ";
-                }
-                
-                if (std::getline(std::cin, command)) {
-                    if (!command.empty()) {
-                        // Allow quit/resign commands at any time
-                        if (command == "quit" || command == "resign") {
-                            send_command(command);
-                            break;
-                        }
-                        // For other commands, check if player has priority
-                        else if (has_priority) {
-                            send_command(command);
-                        } else {
-                            std::cout << "You can only quit/resign when it's not your turn. Other commands require priority.\n";
-                        }
-                    }
-                } else {
-                    break; // EOF or error
-                }
+void connect_to_server(const std::string& host, int port) {
+    // just a symple async connection.
+    auto endpoint = tcp::endpoint(boost::asio::ip::make_address(host), port); 
+    socket.async_connect(endpoint,
+        [this](boost::system::error_code ec) {
+            if (!ec) {
+                connected = true;
+                std::cout << "Connected to server.\n";
+                start_read();
+            } else {
+                std::cerr << "Connection failed: " << ec.message() << "\n";
             }
         });
-        
-        input_thread.detach(); // Let it run independently
-    }
+}
     
+void send_command(const std::string& command) {
+  if (!connected) {
+      std::cout << "Not connected to server!\n";
+      return;
+  }
+  
+  auto msg_copy = std::make_shared<std::string>(command);
+  uint32_t len = htonl(static_cast<uint32_t>(command.size()));
+  
+  auto len_buffer = std::make_shared<std::array<char, sizeof(uint32_t)>>();
+  std::memcpy(len_buffer->data(), &len, sizeof(uint32_t));
+  
+  std::vector<boost::asio::const_buffer> buffers;
+  buffers.push_back(boost::asio::buffer(*len_buffer));
+  buffers.push_back(boost::asio::buffer(*msg_copy));
+  
+  boost::asio::async_write(socket, buffers,
+      [this, msg_copy, len_buffer, command](boost::system::error_code ec, std::size_t length) {
+          if (!ec) {
+              std::cout << "Command sent: " << command << "\n";
+          } else {
+              std::cerr << "Send error: " << ec.message() << "\n";
+              handle_disconnect();
+          }
+      });
+}
+    
+void start_input_loop() {
+    // Run input loop in a separate thread
+    std::thread input_thread([this]() {
+      // command is just a string for now.
+      std::string command;
+      while (connected) {
+          // Always show prompt if connected, but indicate priority status
+          if (has_priority) {
+              std::cout << "\n[You have priority.] > ";
+          } else {
+              std::cout << "\n[WAITING] (type 'quit' or 'resign' to leave) > ";
+          } 
+          if (std::getline(std::cin, command)) {
+            if (!command.empty()) {
+              // Allow quit/resign commands at any time
+              if (command == "quit" || command == "resign") {
+                  send_command(command);
+                  break;
+              }
+              // For other commands, check if player has priority
+              else if (has_priority) {
+                  send_command(command);
+              } else {
+                std::cout<<"You don't have priority."<<std::endl;
+              }
+            }
+          } else {
+              break; // EOF or error
+          }
+      }
+  }); 
+    input_thread.detach(); // Let it run independently
+}
+ 
 private:
     void start_read() {
         if (!connected) return;
-        
         if (reading_header) {
             // Read message length (4 bytes)
             boost::asio::async_read(socket,
