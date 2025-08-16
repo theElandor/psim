@@ -2,7 +2,7 @@
 #include <string>
 #include <vector>
 #include <nlohmann/json.hpp>
-#include "GameState.hpp" 
+#include "PublicInfo.hpp" 
 #include "Card.hpp"
 #include "PlayerInfo.hpp"
 #include "Command.hpp"
@@ -20,13 +20,13 @@ PlayerInfo deserialize_player_info(const std::string& json_str) {
   return p;
 }
     
-GameState deserialize_game_state(const std::string& json_str) {
+PublicInfo deserialize_public_info(const std::string& json_str) {
   nlohmann::json j = nlohmann::json::parse(json_str);
-  GameState g;
-  g.turn = j["turn"];
-  g.priority = j["priority"];
-  g.life_points = j["life_points"].get<std::pair<int,int>>();
-  return g;
+  PublicInfo info;
+  info.turn = j["turn"];
+  info.priority = j["priority"];
+  info.life_points = j["life_points"].get<std::pair<int,int>>();
+  return info;
 }
 
 std::vector<CommandCode> deserialize_available_codes(const std::string& json_str) {

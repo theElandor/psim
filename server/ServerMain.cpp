@@ -6,7 +6,7 @@
 #include <array>
 #include <boost/asio.hpp>
 #include <nlohmann/json.hpp>
-#include "GameState.hpp"
+#include "PublicInfo.hpp"
 #include "Card.hpp"
 #include "PlayerInfo.hpp"
 #include "Command.hpp"
@@ -27,6 +27,8 @@ public:
   std::vector<char> read_buffer;
   uint32_t expected_message_length;
   bool reading_header;
+  // private server information
+  std::vector<Card> deck;
   
   Player(boost::asio::io_context& io, int player_id) 
       : id(player_id), socket(io), connected(false), expected_message_length(0), reading_header(true) {
@@ -39,7 +41,7 @@ private:
   boost::asio::io_context& io_context;
   tcp::acceptor acceptor;
   std::vector<std::shared_ptr<Player>> players;
-  GameState game_state;
+  PublicInfo info;
   int connected_players;
   bool game_started;
     
@@ -47,10 +49,10 @@ public:
   GameServer(boost::asio::io_context& io) 
     : io_context(io), acceptor(io, tcp::endpoint(tcp::v4(), PORT)), 
       connected_players(0), game_started(false) {
-    game_state.turn = 0;
-    game_state.priority = 0;
-    game_state.card_id = 0;
-    game_state.life_points = {20, 20};
+    info.turn = 0;
+    info.priority = 0;
+    info.card_id = 0;
+    info.life_points = {20, 20};
   }
   
   void start() {
@@ -131,7 +133,7 @@ void start_game() {
   if (game_started) return;
   game_started = true; 
   std::cout << "Game starting!\n";
-  broadcast_game_state();
+  broadcast_public_info();
   for (auto& player : players) {
       send_player_info(player);
   }
@@ -224,7 +226,7 @@ void handle_command(std::shared_ptr<Player> player, const Command &command) {
         return;
     }
     // For other commands, check if it's this player's priority
-    if (player->id != game_state.priority) {
+    if (player->id != info.priority) {
         send_message(player, MESSAGE_no_priority);
         return;
     }
@@ -233,7 +235,7 @@ void handle_command(std::shared_ptr<Player> player, const Command &command) {
     std::string response = process_game_command(player, command);
     send_message(player, response);
     // Update game state and notify all players if needed
-    broadcast_game_state();
+    broadcast_public_info();
     notify_priority_player();
 }
 
@@ -242,6 +244,7 @@ bool parse_deck(std::shared_ptr<Player> player, const Command& command){
   // User can upload any sort of string after Upload Deck, so need security checks.
   std::cout<<player->id<<" has uploaded a deck: \n";
   std::cout<<command.target<<std::endl;
+  // turn string into vector of cards and assign it to player.
   return true;
 }  
 
@@ -265,11 +268,12 @@ std::string process_game_command(std::shared_ptr<Player> player, const Command &
     else{ // if ready
       if (command.code == CommandCode::PassPriority) {
           // Switch priority to other player
-          game_state.priority = (game_state.priority + 1) % 2;
+          info.priority = (info.priority + 1) % 2;
           return MESSAGE_pass_priority;
       }
       else{return MESSAGE_unknown_command;}
     } 
+  return MESSAGE_unknown_command;
 }
     
 void handle_player_resignation(std::shared_ptr<Player> player) {
@@ -335,19 +339,19 @@ void send_player_info(std::shared_ptr<Player> player) {
   send_message(player, j.dump());
 }
 
-void send_game_state(std::shared_ptr<Player> player) { 
-  // Sends game state to target player.
+void send_public_info(std::shared_ptr<Player> player) { 
+  // Sends information about game state to target player.
   nlohmann::json j;
-  j["turn"] = game_state.turn;
-  j["priority"] = game_state.priority;
-  j["life_points"] = game_state.life_points;
+  j["turn"] = info.turn;
+  j["priority"] = info.priority;
+  j["life_points"] =  info.life_points;
   send_message(player, j.dump());
 }
-void broadcast_game_state() {
+void broadcast_public_info() {
   // Sends game state to all players.  
   for (auto& player : players) {
       if (player->connected) {
-          send_game_state(player);
+          send_public_info(player);
       }
   }
 }
@@ -368,10 +372,10 @@ void send_available_commands(std::shared_ptr<Player> player) {
 
 void notify_priority_player() { 
   // Sends a priority acquired notification to the player with priority.
-  if (game_state.priority < players.size() && players[game_state.priority]->connected) {
-      send_available_commands(players[game_state.priority]);
-      send_message(players[game_state.priority], "You have priority");
-      std::cout << "Player " << game_state.priority << " now has priority.\n";
+  if (info.priority < players.size() && players[info.priority]->connected) {
+      send_available_commands(players[info.priority]);
+      send_message(players[info.priority], "You have priority");
+      std::cout << "Player " << info.priority << " now has priority.\n";
   }
 }
 };

@@ -9,7 +9,7 @@
 #include <fstream>
 #include <boost/asio.hpp>
 #include <nlohmann/json.hpp>
-#include "GameState.hpp" 
+#include "PublicInfo.hpp" 
 #include "PlayerInfo.hpp"
 #include "sprites.hpp"
 #include "Command.hpp"
@@ -23,7 +23,7 @@ private:
     boost::asio::io_context& io_context;
     tcp::socket socket;
     PlayerInfo player_info;
-    GameState game_state;
+    PublicInfo info;
     bool connected;
     std::vector<char> read_buffer;
     uint32_t expected_message_length;
@@ -225,8 +225,8 @@ void handle_message(const std::string& message) {
         
         // Check if it's game state
         if (j.contains("turn") && j.contains("priority") && j.contains("life_points")) {
-          game_state = deserialize_game_state(message);
-          display_game_state();
+          info = deserialize_public_info(message);
+          display_public_info();
           check_priority();
           return;
         }
@@ -268,7 +268,7 @@ void handle_disconnect() {
 }
             
 void check_priority() {
-  bool new_priority = (player_info.player_id == game_state.priority);
+  bool new_priority = (player_info.player_id == info.priority);
   if (new_priority != has_priority) {
       has_priority = new_priority;
       if (!has_priority) {
@@ -283,12 +283,12 @@ void display_player_info() {
   display_cards(player_info.hand_cards);
 }
     
-void display_game_state() {
+void display_public_info() {
   std::cout << "\n--- Global Information ---\n";
-  std::cout << "Life points: " << game_state.life_points.first 
-            << " " << game_state.life_points.second << "\n";
-  std::cout << "Turn: " << game_state.turn << std::endl;
-  std::cout << "Priority: " << game_state.priority << std::endl;
+  std::cout << "Life points: " << info.life_points.first 
+            << " " << info.life_points.second << "\n";
+  std::cout << "Turn: " << info.turn << std::endl;
+  std::cout << "Priority: " << info.priority << std::endl;
 }
 
 void display_available_commands() {
