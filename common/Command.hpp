@@ -5,21 +5,24 @@
 enum class CommandCode {
     PlayCard,
     PassPriority,
+    UploadDeck,
     Unknown
 };
 
 
 inline std::string commandCodeToString(CommandCode code) {
     switch (code) {
-        case CommandCode::PlayCard:    return "PlayCard";
-        case CommandCode::PassPriority:return "PassPriority";
+        case CommandCode::PlayCard:    return "Play Card";
+        case CommandCode::PassPriority:return "Pass Priority";
+        case CommandCode::UploadDeck :return "Upload Deck";
         default:                       return "Unknown";
     }
 }
 
 inline CommandCode commandCodeFromString(const std::string& str) {
-    if (str == "PlayCard")     return CommandCode::PlayCard;
-    if (str == "PassPriority") return CommandCode::PassPriority;
+    if (str == "Play Card")     return CommandCode::PlayCard;
+    if (str == "Pass Priority") return CommandCode::PassPriority;
+    if (str == "Upload Deck")   return CommandCode::UploadDeck;
     return CommandCode::Unknown;
 }
 

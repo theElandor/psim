@@ -1,10 +1,12 @@
 #include <iostream>
+#include <iterator>
 #include <string>
 #include <vector>
 #include <memory>
 #include <thread>
 #include <cstring>
 #include <array>
+#include <fstream>
 #include <boost/asio.hpp>
 #include <nlohmann/json.hpp>
 #include "GameState.hpp" 
@@ -50,10 +52,10 @@ void connect_to_server(const std::string& host, int port) {
             }
         });
 }
-    
+
 void send_command(const std::string& command) {
   // symple async send of a command string.
-  if (!connected) {
+  if (!connected) { 
       std::cout << "Not connected to server!\n";
       return;
   }
@@ -78,36 +80,54 @@ void send_command(const std::string& command) {
           }
       });
 }
-    
+
+std::string pad_command(CommandCode code){
+    if(code == CommandCode::UploadDeck)
+    {
+      std::cout<<"Insert a valid deck path: \n > ";
+      char path[550];
+      while(true){
+        scanf("%s", path);
+        std::ifstream is(path);
+        if(!is){std::cout<<"Invalid path inserted.\n"; continue;}
+        std::string contents((std::istreambuf_iterator<char>(is)),
+                         std::istreambuf_iterator<char>());
+        is.close(); 
+        return "Upload Deck " + contents;
+      }
+    }
+    return commandCodeToString(code);
+}
 void start_input_loop() {
     // Run input loop in a separate thread
     std::thread input_thread([this]() {
       // command is just a string for now.
       std::string command;
       while (connected) {
-          // Always show prompt if connected, but indicate priority status
-          if (has_priority) {
-              std::cout << "\n[You have priority.] > ";
-          } else {
-              std::cout << "\n[WAITING] (type 'quit' or 'resign' to leave) > ";
-          } 
-          if (std::getline(std::cin, command)) {
-            if (!command.empty()) {
-              // Allow quit/resign commands at any time
-              if (command == "quit" || command == "resign") {
-                  send_command(command);
-                  break;
-              }
-              // For other commands, check if player has priority
-              else if (has_priority) {
-                  send_command(command);
-              } else {
-                std::cout<<"You don't have priority."<<std::endl;
-              }
+        // Always show prompt if connected, but indicate priority status
+        if (has_priority) {
+            std::cout << "\n[You have priority.] > ";
+        } else {
+            std::cout << "\n[WAITING] (type 'quit' or 'resign' to leave) > ";
+        } 
+        if (std::getline(std::cin, command)) {
+          if (!command.empty()) {
+            // Allow quit/resign commands at any time
+            if (command == "quit" || command == "resign") {
+                send_command(command);
+                break;
             }
-          } else {
-              break; // EOF or error
+            // For other commands, check if player has priority
+            else if (has_priority) {
+                CommandCode code = commandCodeFromString(command); 
+                send_command(pad_command(code));
+            } else {
+              std::cout<<"You don't have priority."<<std::endl;
+            }
           }
+        } else {
+            break; // EOF or error
+        }
       }
   }); 
     input_thread.detach(); // Let it run independently

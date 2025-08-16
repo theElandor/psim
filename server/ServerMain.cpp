@@ -10,6 +10,8 @@
 #include "Card.hpp"
 #include "PlayerInfo.hpp"
 #include "Command.hpp"
+#include "Messages.hpp"
+
 #define PORT 5000
 
 using boost::asio::ip::tcp;
@@ -21,6 +23,7 @@ public:
   tcp::socket socket;
   PlayerInfo info;
   bool connected;
+  bool ready; // deck has been uploaded and parsed.
   std::vector<char> read_buffer;
   uint32_t expected_message_length;
   bool reading_header;
@@ -56,277 +59,304 @@ public:
   }
     
 private:
-  void accept_connections() {
-    /*
-      Function called as the server starts.
-      The acceptor waits for async connections.
-      When a client connects, the connection is handled
-      by the "handle_accept()" function, wrapped around the "async_accept()"
-      method of the acceptor.
-     */
-    if (connected_players >= 2) return;
-    auto new_player = std::make_shared<Player>(io_context, connected_players);
-    /*
-      &GameServer -> function pointer
-      Need to bind function pointer to the current game server instance, 
-      we do that with std::bind and pass also the pointer with "this".
-     */
+void accept_connections() {
+  /*
+    Function called as the server starts.
+    The acceptor waits for async connections.
+    When a client connects, the connection is handled
+    by the "handle_accept()" function, wrapped around the "async_accept()"
+    method of the acceptor.
+   */
+  if (connected_players >= 2) return;
+  auto new_player = std::make_shared<Player>(io_context, connected_players);
+  /*
+    &GameServer -> function pointer
+    Need to bind function pointer to the current game server instance, 
+    we do that with std::bind and pass also the pointer with "this".
+   */
 
-    acceptor.async_accept(
-      new_player->socket,
-      std::bind(&GameServer::handle_accept, this, new_player, std::placeholders::_1)
+  acceptor.async_accept(
+    new_player->socket,
+    std::bind(&GameServer::handle_accept, this, new_player, std::placeholders::_1)
+  );
+}
+
+void handle_accept(std::shared_ptr<Player> new_player,boost::system::error_code ec) {
+/*
+  This function initializes some player specific information.
+  Then if the game needs one more player, the "accept_connections()" loop
+  is triggered again. Otherwise the game can start.
+  This function also starts the loop that waits for that specific
+  player commands.
+ */
+  if (!ec) {
+    new_player->connected = true;
+    players.push_back(new_player);
+    connected_players++;
+    std::cout << "Player " << new_player->id << " connected.\n";
+    // Initialize player info
+    initialize_player_info(*new_player);
+    // Start reading from this player
+    // Blocking operation: deck upload.
+    start_read(new_player);
+    if (connected_players < 2) {
+        accept_connections(); // Accept next player
+    } else {
+      start_game();
+    }
+  } else {
+    std::cerr << "Accept error: " << ec.message() << "\n";
+  }
+}
+
+void initialize_player_info(Player& player) {
+  // different cards are initialized for each player.
+  Card Forest_0("Forest", "", 0);
+  Card Mountain_0("Mountain", "",1);
+  Card LlanowarElves_0("Llanowar elves", "Tap to add 1 green", 2);
+
+  Card Forest_1("Forest", "", 3);
+  Card Mountain_1("Mountain", "",4);
+  Card LlanowarElves_1("Llanowar elves", "Tap to add 1 green", 5);
+
+  if (player.id == 0) {
+      player.info = {0, {Forest_0, Mountain_0, Forest_0}};
+  } else {
+      player.info = {1, {LlanowarElves_1, Forest_1}};
+  }
+}
+
+void start_game() {
+// Broadcasts starting information to all players.
+  if (game_started) return;
+  game_started = true; 
+  std::cout << "Game starting!\n";
+  broadcast_game_state();
+  for (auto& player : players) {
+      send_player_info(player);
+  }
+  notify_priority_player();
+}
+
+void start_read(std::shared_ptr<Player> player) {
+// If the player is ready, starts reading commands.
+// Otherwise, will read a deck upload.
+  if (!player->connected) return;
+  else if (player->reading_header) {
+    // Read message length (4 bytes)
+    // handle_read_header is the callback.
+    // _1 and _2 are passed from asio: the error code
+    // and the size_t.
+    // reads 4 bytes(sizeof uint32_t) into the address
+    // of the player's expected_message_length.
+    boost::asio::async_read(
+      player->socket,
+      boost::asio::buffer(&player->expected_message_length, sizeof(uint32_t)),
+      std::bind(&GameServer::handle_read_header, this, player, std::placeholders::_1, std::placeholders::_2)
     );
   }
-
-  void handle_accept(std::shared_ptr<Player> new_player,boost::system::error_code ec) {
-    /*
-      This function initializes some player specific information.
-      Then if the game needs one more player, the "accept_connections()" loop
-      is triggered again. Otherwise the game can start.
-      This function also starts the loop that waits for that specific
-      player commands.
-     */
-    if (!ec) {
-      new_player->connected = true;
-      players.push_back(new_player);
-      connected_players++;
-      std::cout << "Player " << new_player->id << " connected.\n";
-      // Initialize player info
-      initialize_player_info(*new_player);
-      // Start reading from this player
-      start_read(new_player);
-      if (connected_players < 2) {
-          accept_connections(); // Accept next player
-      } else {
-        start_game();
-      }
-    } else {
-      std::cerr << "Accept error: " << ec.message() << "\n";
-    }
+  else {
+      // Read the actual message
+      // reads expected_message_length bytes, previously read thanks
+      // to the header.
+    boost::asio::async_read(
+      player->socket,
+      boost::asio::buffer(player->read_buffer.data(), player->expected_message_length),
+      std::bind(&GameServer::handle_read_body, this, player, std::placeholders::_1, std::placeholders::_2)
+    );
   }
+}
+
+void handle_read_header(std::shared_ptr<Player> player, boost::system::error_code ec, std::size_t /*length*/) {
+  if (!ec) {
+      player->expected_message_length = ntohl(player->expected_message_length);
+      player->reading_header = false;
+      start_read(player); // Proceed to read the body
+  } else {
+      handle_disconnect(player, ec);
+  }
+}
+
+void handle_read_body(std::shared_ptr<Player> player, boost::system::error_code ec, std::size_t /*length*/) {
+  // Just interprets the command and starts reading again.
+  if (!ec) {
+    std::string command(
+        player->read_buffer.begin(),
+        player->read_buffer.begin() + player->expected_message_length
+    );
+    handle_command(player, command);
+    // Reset for next message
+    player->reading_header = true;
+    start_read(player); // Continue reading
+  } else {
+      handle_disconnect(player, ec);
+  }
+}
+
+void handle_disconnect(std::shared_ptr<Player> player, boost::system::error_code ec) {
+// simple handling of disconnection of a player.
+  if (player->connected) {
+      std::cout << "Player " << player->id << " disconnected: " << ec.message() << "\n";
+      player->connected = false;
+      connected_players--;
+      // Notify other players about disconnection
+      broadcast_message("Player " + std::to_string(player->id) + " has left the game");
+      // Handle game state changes due to disconnection
+      handle_player_resignation(player);
+  }
+}
     
-  void initialize_player_info(Player& player) {
-    // different cards are initialized for each player.
-    Card Forest_0("Forest", "", 0);
-    Card Mountain_0("Mountain", "",1);
-    Card LlanowarElves_0("Llanowar elves", "Tap to add 1 green", 2);
-
-    Card Forest_1("Forest", "", 3);
-    Card Mountain_1("Mountain", "",4);
-    Card LlanowarElves_1("Llanowar elves", "Tap to add 1 green", 5);
-    
-    if (player.id == 0) {
-        player.info = {0, {Forest_0, Mountain_0, Forest_0}};
-    } else {
-        player.info = {1, {LlanowarElves_1, Forest_1}};
-    }
-  }
-    
-  void start_game() {
-    // Broadcasts starting information to all players.
-    if (game_started) return;
-    game_started = true; 
-    std::cout << "Game starting!\n";
-    broadcast_game_state();
-    for (auto& player : players) {
-        send_player_info(player);
-    }
-    notify_priority_player();
-  }
-
-  void start_read(std::shared_ptr<Player> player) {
-    // Either reads the message header or the body.
-    if (!player->connected) return;
-    if (player->reading_header) {
-      // Read message length (4 bytes)
-      // handle_read_header is the callback.
-      // _1 and _2 are passed from asio: the error code
-      // and the size_t.
-      // reads 4 bytes(sizeof uint32_t) into the address
-      // of the player's expected_message_length.
-      boost::asio::async_read(
-        player->socket,
-        boost::asio::buffer(&player->expected_message_length, sizeof(uint32_t)),
-        std::bind(&GameServer::handle_read_header, this, player, std::placeholders::_1, std::placeholders::_2)
-      );
-    }
-    else {
-        // Read the actual message
-        // reads expected_message_length bytes, previously read thanks
-        // to the header.
-      boost::asio::async_read(
-        player->socket,
-        boost::asio::buffer(player->read_buffer.data(), player->expected_message_length),
-        std::bind(&GameServer::handle_read_body, this, player, std::placeholders::_1, std::placeholders::_2)
-      );
-    }
-  }
-
-  void handle_read_header(std::shared_ptr<Player> player, boost::system::error_code ec, std::size_t /*length*/) {
-    if (!ec) {
-        player->expected_message_length = ntohl(player->expected_message_length);
-        player->reading_header = false;
-        start_read(player); // Proceed to read the body
-    } else {
-        handle_disconnect(player, ec);
-    }
-  }
-
-  void handle_read_body(std::shared_ptr<Player> player, boost::system::error_code ec, std::size_t /*length*/) {
-    // Just interprets the command and starts reading again.
-    if (!ec) {
-        std::string command(
-            player->read_buffer.begin(),
-            player->read_buffer.begin() + player->expected_message_length
-        );
-        handle_command(player, command);
-        // Reset for next message
-        player->reading_header = true;
-        start_read(player); // Continue reading
-    } else {
-        handle_disconnect(player, ec);
-    }
-  }
-
-  void handle_disconnect(std::shared_ptr<Player> player, boost::system::error_code ec) {
-    // simple handling of disconnection of a player.
-    if (player->connected) {
-        std::cout << "Player " << player->id << " disconnected: " << ec.message() << "\n";
-        player->connected = false;
-        connected_players--;
-        // Notify other players about disconnection
-        broadcast_message("Player " + std::to_string(player->id) + " has left the game");
-        // Handle game state changes due to disconnection
+void handle_command(std::shared_ptr<Player> player, const std::string& command) {
+    std::cout << "Received command from player " << player->id << ": " << command << "\n";
+    // Allow quit/resign at any time, regardless of priority
+    if (command == "quit" || command == "resign") {
         handle_player_resignation(player);
+        return;
+    }
+    // For other commands, check if it's this player's priority
+    if (player->id != game_state.priority) {
+        send_message(player, "It's not your turn! You can only quit/resign when it's not your turn.");
+        return;
+    }
+    // Process the command for the player with priority
+    std::string response = process_game_command(player, command);
+    send_message(player, response);
+    // Update game state and notify all players if needed
+    broadcast_game_state();
+    notify_priority_player();
+}
+bool deck_upload(std::shared_ptr<Player> player, const std::string& command){
+  // write deck parsing logic here.
+  // User can upload any sort of string after Upload Deck, so need security checks.
+  std::cout<<player->id<<" has uploaded a deck: \n";
+  std::cout<<command<<std::endl;
+  return true;
+}  
+
+bool starts_with(const std::string& str, const std::string& prefix) {
+    return str.size() >= prefix.size() &&
+           str.compare(0, prefix.size(), prefix) == 0;
+}
+
+std::string process_game_command(std::shared_ptr<Player> player, const std::string& command) {
+    // This is where you'd implement your actual game logic
+    // The string is returned and sent to the client for now.
+    if(!player->ready){
+      if (starts_with(command, "Upload Deck")) return MESSAGE_upload;
+      else{
+        if(deck_upload(player, command)) player->ready = true;
+      }
+    }
+    if (command == "pass") {
+        // Switch priority to other player
+        game_state.priority = (game_state.priority + 1) % 2;
+        return "Priority passed";
+    }
+    return "Command processed: " + command;
+}
+    
+void handle_player_resignation(std::shared_ptr<Player> player) {
+  // Just disconnects every player.
+  std::string message = "Player " + std::to_string(player->id) + " has resigned. Game over.";
+  broadcast_message(message);
+  // Close all connections and stop the server
+  for (auto& p : players) {
+    if (p->connected && p != player) {
+      try {
+          p->socket.close();
+      } catch (...) {}
+      p->connected = false;
     }
   }
-    
-    void handle_command(std::shared_ptr<Player> player, const std::string& command) {
-        std::cout << "Received command from player " << player->id << ": " << command << "\n";
-        // Allow quit/resign at any time, regardless of priority
-        if (command == "quit" || command == "resign") {
-            handle_player_resignation(player);
-            return;
-        }
-        // For other commands, check if it's this player's priority
-        if (player->id != game_state.priority) {
-            send_message(player, "It's not your turn! You can only quit/resign when it's not your turn.");
-            return;
-        }
-        // Process the command for the player with priority
-        std::string response = process_game_command(player, command);
-        send_message(player, response);
-        // Update game state and notify all players if needed
-        broadcast_game_state();
-        notify_priority_player();
-    }
-    
-    std::string process_game_command(std::shared_ptr<Player> player, const std::string& command) {
-        // This is where you'd implement your actual game logic
-        // For now, just a placeholder
-        if (command == "pass") {
-            // Switch priority to other player
-            game_state.priority = (game_state.priority + 1) % 2;
-            return "Priority passed";
-        }
-        return "Command processed: " + command;
-    }
-    
-    void handle_player_resignation(std::shared_ptr<Player> player) {
-      // Just disconnects every player.
-      std::string message = "Player " + std::to_string(player->id) + " has resigned. Game over.";
-      broadcast_message(message);
-      // Close all connections and stop the server
-      for (auto& p : players) {
-        if (p->connected && p != player) {
-          try {
-              p->socket.close();
-          } catch (...) {}
-          p->connected = false;
-        }
-      }
-      std::cout << message << "\n";
-    }
+  std::cout << message << "\n";
+}
 
-    void send_message(std::shared_ptr<Player> player, const std::string& message) {
-      // Sends an asyncronous message to target player.
+void send_message(std::shared_ptr<Player> player, const std::string& message) {
+  // Sends an asyncronous message to target player.
 
-      if (!player->connected) return;
-      // create shared pointer to message to avoid deallocating it      
-      auto msg_copy = std::make_shared<std::string>(message);
-      // get the length of the message and use htonl to make
-      // it tranasferable through network.
-      uint32_t len = htonl(static_cast<uint32_t>(message.size()));
-      // creates a buffer to store the lenght 
-      auto len_buffer = std::make_shared<std::array<char, sizeof(uint32_t)>>();
-      // copy the length into the buffer.
-      std::memcpy(len_buffer->data(), &len, sizeof(uint32_t));
-      
-      // create a vector of buffers to send together. 
-      std::vector<boost::asio::const_buffer> buffers;
-      // put in the buffer the length buffer and the message buffer.
-      buffers.push_back(boost::asio::buffer(*len_buffer));
-      buffers.push_back(boost::asio::buffer(*msg_copy));
-      // send the buffers and the lambda is the callback,
-      // so just a function executed when the operation is finished. 
-      // Inside the callback you can use the captured parameters.
-      boost::asio::async_write(player->socket, buffers,
-        [this, player, msg_copy, len_buffer](boost::system::error_code ec, std::size_t length) {
-          if (ec) { // if error during sending...
-            handle_disconnect(player, ec);
-          }
-        });
-    }
-    
-    void broadcast_message(const std::string& message) {
-      // Sends a string to all players.
-      for (auto& player : players) {
-        if (player->connected) {
-            send_message(player, message);
-        }
+  if (!player->connected) return;
+  // create shared pointer to message to avoid deallocating it      
+  auto msg_copy = std::make_shared<std::string>(message);
+  // get the length of the message and use htonl to make
+  // it tranasferable through network.
+  uint32_t len = htonl(static_cast<uint32_t>(message.size()));
+  // creates a buffer to store the lenght 
+  auto len_buffer = std::make_shared<std::array<char, sizeof(uint32_t)>>();
+  // copy the length into the buffer.
+  std::memcpy(len_buffer->data(), &len, sizeof(uint32_t));
+  
+  // create a vector of buffers to send together. 
+  std::vector<boost::asio::const_buffer> buffers;
+  // put in the buffer the length buffer and the message buffer.
+  buffers.push_back(boost::asio::buffer(*len_buffer));
+  buffers.push_back(boost::asio::buffer(*msg_copy));
+  // send the buffers and the lambda is the callback,
+  // so just a function executed when the operation is finished. 
+  // Inside the callback you can use the captured parameters.
+  boost::asio::async_write(player->socket, buffers,
+    [this, player, msg_copy, len_buffer](boost::system::error_code ec, std::size_t length) {
+      if (ec) { // if error during sending...
+        handle_disconnect(player, ec);
       }
+    });
+}
+
+void broadcast_message(const std::string& message) {
+  // Sends a string to all players.
+  for (auto& player : players) {
+    if (player->connected) {
+        send_message(player, message);
     }
+  }
+}
     
-    void send_player_info(std::shared_ptr<Player> player) {
-      // Sends private information to target player. 
-      nlohmann::json j;
-      j["player_id"] = player->info.player_id;
-      j["hand_cards"] = player->info.hand_cards;
-      send_message(player, j.dump());
-    }
- 
-    void send_game_state(std::shared_ptr<Player> player) { 
-      // Sends game state to target player.
-      nlohmann::json j;
-      j["turn"] = game_state.turn;
-      j["priority"] = game_state.priority;
-      j["life_points"] = game_state.life_points;
-      send_message(player, j.dump());
-    }
-    void broadcast_game_state() {
-      // Sends game state to all players.  
-      for (auto& player : players) {
-          if (player->connected) {
-              send_game_state(player);
-          }
+void send_player_info(std::shared_ptr<Player> player) {
+  // Sends private information to target player. 
+  nlohmann::json j;
+  j["player_id"] = player->info.player_id;
+  j["hand_cards"] = player->info.hand_cards;
+  send_message(player, j.dump());
+}
+
+void send_game_state(std::shared_ptr<Player> player) { 
+  // Sends game state to target player.
+  nlohmann::json j;
+  j["turn"] = game_state.turn;
+  j["priority"] = game_state.priority;
+  j["life_points"] = game_state.life_points;
+  send_message(player, j.dump());
+}
+void broadcast_game_state() {
+  // Sends game state to all players.  
+  for (auto& player : players) {
+      if (player->connected) {
+          send_game_state(player);
       }
-    }
-    
-    void send_available_commands(std::shared_ptr<Player> player) { 
-      // Sends available commands to target player. Needed for frontend.
-      std::vector<CommandCode> commands {CommandCode::PlayCard, CommandCode::PassPriority};
-      nlohmann::json j = serializeCommandCodeVector(commands);
-      send_message(player, j.dump());
-    }
-    
-    void notify_priority_player() { 
-      // Sends a priority acquired notification to the player with priority.
-      if (game_state.priority < players.size() && players[game_state.priority]->connected) {
-          send_available_commands(players[game_state.priority]);
-          send_message(players[game_state.priority], "You have priority");
-          std::cout << "Player " << game_state.priority << " now has priority.\n";
-      }
-    }
+  }
+}
+
+void send_available_commands(std::shared_ptr<Player> player) { 
+  // Sends available commands to target player. Needed for frontend.
+  std::vector<CommandCode> commands;
+  if (player->ready){
+    commands = {CommandCode::PlayCard, 
+    CommandCode::PassPriority};
+  }
+  else{
+    commands = {CommandCode::UploadDeck};
+  }
+  nlohmann::json j = serializeCommandCodeVector(commands);
+  send_message(player, j.dump());
+}
+
+void notify_priority_player() { 
+  // Sends a priority acquired notification to the player with priority.
+  if (game_state.priority < players.size() && players[game_state.priority]->connected) {
+      send_available_commands(players[game_state.priority]);
+      send_message(players[game_state.priority], "You have priority");
+      std::cout << "Player " << game_state.priority << " now has priority.\n";
+  }
+}
 };
 
 int main() {
