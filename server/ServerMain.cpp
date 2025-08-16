@@ -4,6 +4,7 @@
 #include <memory>
 #include <cstring>
 #include <array>
+#include <sstream>
 #include <boost/asio.hpp>
 #include <nlohmann/json.hpp>
 #include "PublicInfo.hpp"
@@ -245,6 +246,28 @@ bool parse_deck(std::shared_ptr<Player> player, const Command& command){
   std::cout<<player->id<<" has uploaded a deck: \n";
   std::cout<<command.target<<std::endl;
   // turn string into vector of cards and assign it to player.
+  std::cout<<"parse_deck -> starting deck_parsing..."<<std::endl;
+  std::stringstream is(command.target);
+  std::string line;
+  int copies;
+  std::string name;
+  while(true){
+    if(!std::getline(is,line)){
+      std::cout<<"Reached end of list.\n";
+      return true;
+    }
+    std::stringstream is_line(line);
+    is_line>>copies;
+    if(!std::getline(is_line,name)){
+      std::cout<<"Something went wrong during parsing.\n";
+      return false;
+    }
+    std::cout<<"Copies: "<<copies<<" Card: "<<name<<std::endl;
+    if((int)is.peek() == 13){
+      std::cout<<"Sideboard: \n";
+      is.ignore(2); // ignore carriage return
+    }
+  }  
   return true;
 }  
 
