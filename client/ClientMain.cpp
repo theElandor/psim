@@ -53,56 +53,83 @@ void connect_to_server(const std::string& host, int port) {
         });
 }
 
-void send_command(const std::string& command) {
-  // symple async send of a command string.
-  if (!connected) { 
-      std::cout << "Not connected to server!\n";
-      return;
-  }
-  
-  auto msg_copy = std::make_shared<std::string>(command);
-  uint32_t len = htonl(static_cast<uint32_t>(command.size()));
-  
-  auto len_buffer = std::make_shared<std::array<char, sizeof(uint32_t)>>();
-  std::memcpy(len_buffer->data(), &len, sizeof(uint32_t));
-  
-  std::vector<boost::asio::const_buffer> buffers;
-  buffers.push_back(boost::asio::buffer(*len_buffer));
-  buffers.push_back(boost::asio::buffer(*msg_copy));
-  
-  boost::asio::async_write(socket, buffers,
+void send_command(const Command& command) {
+  if (!connected) {
+    std::cout << "Not connected to server!\n";
+    return;
+  } 
+  try {
+    // Serialize command to JSON
+    nlohmann::json j;
+    to_json(j, command);
+    std::string json_str = j.dump();
+    
+    auto msg_copy = std::make_shared<std::string>(json_str);
+    uint32_t len = htonl(static_cast<uint32_t>(json_str.size()));
+    
+    auto len_buffer = std::make_shared<std::array<char, sizeof(uint32_t)>>();
+    std::memcpy(len_buffer->data(), &len, sizeof(uint32_t));
+    
+    std::vector<boost::asio::const_buffer> buffers;
+    buffers.push_back(boost::asio::buffer(*len_buffer));
+    buffers.push_back(boost::asio::buffer(*msg_copy));
+    
+    boost::asio::async_write(socket, buffers,
       [this, msg_copy, len_buffer, command](boost::system::error_code ec, std::size_t length) {
           if (!ec) {
-              std::cout << "Command sent: " << command << "\n";
+              std::cout << "Command sent: " << command.toString() << "\n";
           } else {
               std::cerr << "Send error: " << ec.message() << "\n";
               handle_disconnect();
           }
-      });
+        });
+  } catch (const std::exception& e) {
+      std::cerr << "Error serializing command: " << e.what() << "\n";
+  }
 }
 
-std::string pad_command(CommandCode code){
-    if(code == CommandCode::UploadDeck)
-    {
-      std::cout<<"Insert a valid deck path: \n > ";
-      char path[550];
-      while(true){
-        scanf("%s", path);
-        std::ifstream is(path);
-        if(!is){std::cout<<"Invalid path inserted.\n"; continue;}
-        std::string contents((std::istreambuf_iterator<char>(is)),
-                         std::istreambuf_iterator<char>());
-        is.close(); 
-        return "Upload Deck " + contents;
-      }
+std::string open_deck(){
+  std::cout << "Insert a valid deck path: ";
+  std::string path;
+  while (true) {
+    std::getline(std::cin, path);
+    std::ifstream is(path);
+    if (!is) {
+        std::cout<<"Invalid path. Try again: ";
+        continue;
     }
-    return commandCodeToString(code);
+    
+    std::string contents((std::istreambuf_iterator<char>(is)),
+                       std::istreambuf_iterator<char>());
+    is.close();
+    return contents;
+  }
+  return "something went wrong";
 }
+
+Command create_command_from_input(CommandCode code) {
+  Command cmd;
+  cmd.code = code;
+  
+  switch (code) {      
+    case CommandCode::UploadDeck: {
+        std::string contents = open_deck(); 
+        cmd.target = contents;
+        break;
+    }   
+    case CommandCode::PassPriority:
+      break;            
+    default:
+      break;
+  } 
+    return cmd;
+}
+
 void start_input_loop() {
     // Run input loop in a separate thread
     std::thread input_thread([this]() {
       // command is just a string for now.
-      std::string command;
+      std::string input;
       while (connected) {
         // Always show prompt if connected, but indicate priority status
         if (has_priority) {
@@ -110,17 +137,22 @@ void start_input_loop() {
         } else {
             std::cout << "\n[WAITING] (type 'quit' or 'resign' to leave) > ";
         } 
-        if (std::getline(std::cin, command)) {
-          if (!command.empty()) {
+        if (std::getline(std::cin, input)) {
+          if (!input.empty()) {
             // Allow quit/resign commands at any time
-            if (command == "quit" || command == "resign") {
-                send_command(command);
+            if (input == "quit") {
+                send_command(Command(CommandCode::Quit));
+                break;
+            }
+            if (input == "resign"){
+                send_command(Command(CommandCode::Resign));
                 break;
             }
             // For other commands, check if player has priority
             else if (has_priority) {
-                CommandCode code = commandCodeFromString(command); 
-                send_command(pad_command(code));
+                CommandCode code = commandCodeFromString(input); 
+                Command command = create_command_from_input(code);
+                send_command(command);
             } else {
               std::cout<<"You don't have priority."<<std::endl;
             }

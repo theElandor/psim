@@ -180,14 +180,25 @@ void handle_read_header(std::shared_ptr<Player> player, boost::system::error_cod
 void handle_read_body(std::shared_ptr<Player> player, boost::system::error_code ec, std::size_t /*length*/) {
   // Just interprets the command and starts reading again.
   if (!ec) {
-    std::string command(
+    std::string json_str(
         player->read_buffer.begin(),
         player->read_buffer.begin() + player->expected_message_length
     );
-    handle_command(player, command);
+    
+    try {
+        // Deserialize the Command from JSON
+        nlohmann::json j = nlohmann::json::parse(json_str);
+        Command command;
+        from_json(j, command);        
+        handle_command(player, command);
+    } catch (const nlohmann::json::parse_error& e) {
+        std::cerr << "JSON parse error " << player->id << ": " << e.what() << "\n";
+        send_message(player, "Invalid command format");
+    }
+    
     // Reset for next message
     player->reading_header = true;
-    start_read(player); // Continue reading
+    start_read(player);
   } else {
       handle_disconnect(player, ec);
   }
@@ -206,30 +217,31 @@ void handle_disconnect(std::shared_ptr<Player> player, boost::system::error_code
   }
 }
     
-void handle_command(std::shared_ptr<Player> player, const std::string& command) {
-    std::cout << "Received command from player " << player->id << ": " << command << "\n";
-    // Allow quit/resign at any time, regardless of priority
-    if (command == "quit" || command == "resign") {
+void handle_command(std::shared_ptr<Player> player, const Command &command) {
+    std::cout << "Received command from player " << player->id << ": " << command.toString()<< "\n";
+    if (command.code == CommandCode::Quit || command.code == CommandCode::Resign) {
         handle_player_resignation(player);
         return;
     }
     // For other commands, check if it's this player's priority
     if (player->id != game_state.priority) {
-        send_message(player, "It's not your turn! You can only quit/resign when it's not your turn.");
+        send_message(player, MESSAGE_no_priority);
         return;
     }
     // Process the command for the player with priority
+    std::cout<<MESSAGE_processing_command;
     std::string response = process_game_command(player, command);
     send_message(player, response);
     // Update game state and notify all players if needed
     broadcast_game_state();
     notify_priority_player();
 }
-bool deck_upload(std::shared_ptr<Player> player, const std::string& command){
+
+bool parse_deck(std::shared_ptr<Player> player, const Command& command){
   // write deck parsing logic here.
   // User can upload any sort of string after Upload Deck, so need security checks.
   std::cout<<player->id<<" has uploaded a deck: \n";
-  std::cout<<command<<std::endl;
+  std::cout<<command.target<<std::endl;
   return true;
 }  
 
@@ -238,21 +250,26 @@ bool starts_with(const std::string& str, const std::string& prefix) {
            str.compare(0, prefix.size(), prefix) == 0;
 }
 
-std::string process_game_command(std::shared_ptr<Player> player, const std::string& command) {
+std::string process_game_command(std::shared_ptr<Player> player, const Command &command) {
     // This is where you'd implement your actual game logic
     // The string is returned and sent to the client for now.
-    if(!player->ready){
-      if (starts_with(command, "Upload Deck")) return MESSAGE_upload;
-      else{
-        if(deck_upload(player, command)) player->ready = true;
+    if(!player->ready){ // if not ready
+      if(command.code != CommandCode::UploadDeck){return MESSAGE_upload;}
+      else{ // received an upload.
+        if(parse_deck(player, command)){
+          player->ready = true;
+          return MESSAGE_correct_deck_upload;
+        }
       }
     }
-    if (command == "pass") {
-        // Switch priority to other player
-        game_state.priority = (game_state.priority + 1) % 2;
-        return "Priority passed";
-    }
-    return "Command processed: " + command;
+    else{ // if ready
+      if (command.code == CommandCode::PassPriority) {
+          // Switch priority to other player
+          game_state.priority = (game_state.priority + 1) % 2;
+          return MESSAGE_pass_priority;
+      }
+      else{return MESSAGE_unknown_command;}
+    } 
 }
     
 void handle_player_resignation(std::shared_ptr<Player> player) {

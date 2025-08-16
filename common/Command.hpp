@@ -3,9 +3,11 @@
 #include <nlohmann/json.hpp>
 
 enum class CommandCode {
-    PlayCard,
-    PassPriority,
-    UploadDeck,
+    PlayCard, // Play a card
+    PassPriority, // Pass priority to other player
+    UploadDeck, // Command to upload deck
+    Resign,
+    Quit,
     Unknown
 };
 
@@ -14,7 +16,9 @@ inline std::string commandCodeToString(CommandCode code) {
     switch (code) {
         case CommandCode::PlayCard:    return "Play Card";
         case CommandCode::PassPriority:return "Pass Priority";
-        case CommandCode::UploadDeck :return "Upload Deck";
+        case CommandCode::UploadDeck:  return "Upload Deck";
+        case CommandCode::Resign:      return "Resign"; 
+        case CommandCode::Quit:        return "Quit"; 
         default:                       return "Unknown";
     }
 }
@@ -23,6 +27,8 @@ inline CommandCode commandCodeFromString(const std::string& str) {
     if (str == "Play Card")     return CommandCode::PlayCard;
     if (str == "Pass Priority") return CommandCode::PassPriority;
     if (str == "Upload Deck")   return CommandCode::UploadDeck;
+    if (str == "Resign")        return CommandCode::Resign;
+    if (str == "Quit")          return CommandCode::Quit;
     return CommandCode::Unknown;
 }
 
@@ -38,7 +44,7 @@ class Command {
 public:
     Command() = default;
 
-    Command(CommandCode code, const std::string& target, const std::string& extra)
+    Command(CommandCode code, const std::string& target="", const std::string& extra="")
         : code(code), target(target), extra(extra) {}
 
     std::string toString() const {
