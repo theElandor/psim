@@ -1,9 +1,16 @@
 #include <iostream>
 #include <SDL2/SDL.h>
+#include <SDL2/SDL_image.h>
 #include <vector>
+#include "Scryfall.hpp"
+#include <string>
+#include <nlohmann/json.hpp>
+#include <curl/curl.h>
 
 #define PADDING 20
 #define TITLE_PORTION 0.2
+
+using json = nlohmann::json;
 
 struct Card{
   std::string name;
@@ -23,6 +30,63 @@ SDL_Color COLORS[4] = {
     {255, 255, 0, 255}  // Yellow
 };
 
+std::string getCardImageURL(const std::string& jsonString) {
+    auto j = json::parse(jsonString);
+    if (j.contains("image_uris") && j["image_uris"].contains("normal")) {
+        return j["image_uris"]["normal"].get<std::string>();
+    }
+    return ""; // fallback
+}
+
+
+size_t WriteCallback(void* contents, size_t size, size_t nmemb, void* userp) {
+    size_t totalSize = size * nmemb;
+    std::vector<unsigned char>* buffer = static_cast<std::vector<unsigned char>*>(userp);
+    buffer->insert(buffer->end(), (unsigned char*)contents, (unsigned char*)contents + totalSize);
+    return totalSize;
+}
+
+std::vector<unsigned char> downloadImage(const std::string& url) {
+    CURL* curl = curl_easy_init();
+    std::vector<unsigned char> buffer;
+
+    if (curl) {
+        curl_easy_setopt(curl, CURLOPT_URL, url.c_str());
+
+        // Make sure to cast to curl_write_callback
+        curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, static_cast<size_t(*)(void*,size_t,size_t,void*)>(WriteCallback));
+        curl_easy_setopt(curl, CURLOPT_WRITEDATA, &buffer);
+
+        CURLcode res = curl_easy_perform(curl);
+        if (res != CURLE_OK) {
+            std::cerr << "curl_easy_perform() failed: " << curl_easy_strerror(res) << "\n";
+        }
+
+        curl_easy_cleanup(curl);
+    }
+
+    return buffer;
+}
+
+SDL_Texture* loadTextureFromMemory(SDL_Renderer* renderer, const std::vector<unsigned char>& imageData) {
+    SDL_RWops* rw = SDL_RWFromConstMem(imageData.data(), imageData.size());
+    if (!rw) {
+        std::cerr << "SDL_RWFromConstMem failed: " << SDL_GetError() << "\n";
+        return nullptr;
+    }
+
+    SDL_Surface* surface = IMG_Load_RW(rw, 1); // 1 = SDL frees the RWops
+    if (!surface) {
+        std::cerr << "IMG_Load_RW failed: " << IMG_GetError() << "\n";
+        return nullptr;
+    }
+
+    SDL_Texture* texture = SDL_CreateTextureFromSurface(renderer, surface);
+    SDL_FreeSurface(surface);
+
+    return texture;
+}
+
 void render_column(SDL_Renderer* renderer, Column &c, int win_h, int col_width){
   SDL_SetRenderDrawColor(renderer,
                          c.borderColor.r, c.borderColor.g, 
@@ -30,7 +94,15 @@ void render_column(SDL_Renderer* renderer, Column &c, int win_h, int col_width){
   SDL_RenderDrawLine(renderer, c.x+PADDING/2, 0, c.x+PADDING/2, win_h);
   SDL_RenderDrawLine(renderer, c.x+col_width-PADDING/2, 0, c.x+col_width-PADDING/2, win_h);
 }
-
+void download_random_card(Card &card, SDL_Renderer* renderer){
+  ScryfallAPI api;
+  std::cout<<"Downloading card information..."<<std::endl;
+  std::string card_info = api.getRandomCard();
+  std::string url = getCardImageURL(card_info);
+  auto imageData = downloadImage(url);
+  SDL_Texture *texture = loadTextureFromMemory(renderer,imageData); 
+  card.texture = texture;
+}
 void render_cards(SDL_Renderer* renderer, Column &c, int win_h, int col_width){
   SDL_SetRenderDrawColor(renderer,255,255,255,255); 
   float offset;
@@ -43,10 +115,12 @@ void render_cards(SDL_Renderer* renderer, Column &c, int win_h, int col_width){
     offset = dyn_h * (TITLE_PORTION);
     rect.h = static_cast<int>(dyn_h);
     rect.y = static_cast<int>(offset*i);
-    SDL_RenderDrawRect(renderer, &rect);
+    // SDL_RenderDrawRect(renderer, &rect);
+    SDL_RenderCopy(renderer, c.cards[i].texture, nullptr, &rect);
   }
 }
 int main(int argc, char** argv) {
+
   // Prevent compositor transparency issues
   int win_w = 1280;
   int win_h = 720;
@@ -80,10 +154,11 @@ int main(int argc, char** argv) {
   SDL_Event e;
   std::vector<Column> cols;
   // initialize columns
-  const int num_cols = 10;
+  const int num_cols = 8;
   for(int i = 0; i < num_cols; i++){
     Column col;
     Card sample_card;
+    download_random_card(sample_card, renderer);
     sample_card.w = 20; sample_card.h=30;
     col.cards = {sample_card, sample_card, sample_card};
     col.borderColor = COLORS[i%4];
