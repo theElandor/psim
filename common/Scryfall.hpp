@@ -109,35 +109,6 @@ void printSeparator(const std::string& title) {
     std::cout << std::string(50, '=') << std::endl;
 }
 
-int main() {
-    std::cout << "Scryfall API C++ Example\n";
-
-    ScryfallAPI api;
-
-    // Example 1: Get a specific card by name
-    printSeparator("Getting 'Lightning Bolt' by name:");
-    std::string lightningBolt = api.getCardByName("Lightning Bolt");
-    std::cout << lightningBolt << std::endl;
-    /* Some more AI generated examples:
-      // Example 2: Get a random card
-       printSeparator("Getting a random card:");
-       std::string randomCard = api.getRandomCard();
-       std::cout << randomCard << std::endl;
-
-       // Example 3: Search for cards
-       printSeparator("Searching for blue creatures:");
-       std::string searchResults = api.searchCards("c:blue t:creature");
-       std::cout << searchResults << std::endl;
-
-       // Example 4: Get card by specific ID (Black Lotus example)
-       printSeparator("Getting Black Lotus by Scryfall ID:");
-       std::string blackLotus = api.getCardById("bd8fa327-dd41-4737-8f19-2cf5eb1f7cdd");
-       std::cout << blackLotus << std::endl;
-    */
-   
-    return 0;
-}
-
 // Compilation instructions:
 // On Ubuntu/Debian: sudo apt-get install libcurl4-openssl-dev
 // On macOS with Homebrew: brew install curl

@@ -12,6 +12,7 @@
 #include "PlayerInfo.hpp"
 #include "Command.hpp"
 #include "Messages.hpp"
+#include "Scryfall.hpp"
 
 #define PORT 5000
 
@@ -248,6 +249,13 @@ void handle_command(std::shared_ptr<Player> player, const Command &command) {
     // Update game state and notify all players if needed
     broadcast_public_info();
     notify_priority_player();
+}
+
+std::string download_card_info(std::string &card_name){
+    // Downloads JSON info.
+    ScryfallAPI api;
+    std::string card_info = api.getCardByName(card_name);
+    return card_info;
 }
 
 bool parse_deck(std::shared_ptr<Player> player, const Command& command){
