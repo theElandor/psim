@@ -29,11 +29,21 @@ public:
   uint32_t expected_message_length;
   bool reading_header;
   // private server information
-  std::vector<Card> deck;
-  
+  std::vector<Card> deck; 
+  std::vector<Card> sideboard;
   Player(boost::asio::io_context& io, int player_id) 
       : id(player_id), socket(io), connected(false), expected_message_length(0), reading_header(true) {
       read_buffer.resize(65536); // 64KB buffer
+  }
+  void print_raw_deck(){
+    std::cout<<"Main deck"<<"("<<deck.size()<<"):\n";
+    for(auto &c:deck){
+      std::cout<<c.title<<std::endl;
+    }
+    std::cout<<"Sideboard"<<"("<<sideboard.size()<<"):\n";
+    for(auto &c:sideboard){
+      std::cout<<c.title<<std::endl;
+    }
   }
 };
 
@@ -241,19 +251,25 @@ void handle_command(std::shared_ptr<Player> player, const Command &command) {
 }
 
 bool parse_deck(std::shared_ptr<Player> player, const Command& command){
-  // write deck parsing logic here.
-  // User can upload any sort of string after Upload Deck, so need security checks.
+  /*
+    This function parses a deck in the standard MTGO format.
+    Probably needs extra refinment and security checks.
+    AI kinds of writes very convoluted code, so I wrote this myself.
+  */
   std::cout<<player->id<<" has uploaded a deck: \n";
   std::cout<<command.target<<std::endl;
+  player->deck.clear();
   // turn string into vector of cards and assign it to player.
   std::cout<<"parse_deck -> starting deck_parsing..."<<std::endl;
   std::stringstream is(command.target);
   std::string line;
   int copies;
+  bool sideboard = false;
   std::string name;
   while(true){
     if(!std::getline(is,line)){
       std::cout<<"Reached end of list.\n";
+      player->print_raw_deck();
       return true;
     }
     std::stringstream is_line(line);
@@ -262,14 +278,20 @@ bool parse_deck(std::shared_ptr<Player> player, const Command& command){
       std::cout<<"Something went wrong during parsing.\n";
       return false;
     }
-    std::cout<<"Copies: "<<copies<<" Card: "<<name<<std::endl;
-    if((int)is.peek() == 13){
-      std::cout<<"Sideboard: \n";
-      is.ignore(2); // ignore carriage return
+    for(int i = 0; i < copies; i++){
+      // add card to either sideboard or main deck
+      if(sideboard)
+        player->sideboard.emplace_back(name, "", info.card_id++);
+      else
+        player->deck.emplace_back(name, "", info.card_id++);
     }
-  }  
-  return true;
-}  
+    if((int)is.peek() == 13){
+      sideboard = true;
+      is.ignore(2); // ignore carriage return and newline.
+    }
+  } 
+  return false;
+} 
 
 bool starts_with(const std::string& str, const std::string& prefix) {
     return str.size() >= prefix.size() &&
