@@ -140,7 +140,7 @@ void initialize_player_info(Player& player) {
 }
 
 void start_game() {
-// Broadcasts starting information to all players.
+  // Broadcasts starting information to all players.
   if (game_started) return;
   game_started = true; 
   std::cout << "Game starting!\n";
@@ -152,8 +152,8 @@ void start_game() {
 }
 
 void start_read(std::shared_ptr<Player> player) {
-// If the player is ready, starts reading commands.
-// Otherwise, will read a deck upload.
+  // If the player is ready, starts reading commands.
+  // Otherwise, will read a deck upload.
   if (!player->connected) return;
   else if (player->reading_header) {
     // Read message length (4 bytes)
