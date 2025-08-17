@@ -3,7 +3,7 @@
 #include <vector>
 
 #define PADDING 20
-
+#define TITLE_PORTION 0.2
 
 struct Card{
   std::string name;
@@ -33,14 +33,16 @@ void render_column(SDL_Renderer* renderer, Column &c, int win_h, int col_width){
 
 void render_cards(SDL_Renderer* renderer, Column &c, int win_h, int col_width){
   SDL_SetRenderDrawColor(renderer,255,255,255,255); 
+  float offset;
   for(int i = 0; i < c.cards.size(); i++){
     SDL_Rect rect;
     rect.x = c.x+PADDING/2;
-    rect.y = c.y;
     float dyn_h;
     rect.w = col_width-PADDING; 
     dyn_h = ((float)rect.w/66)*88;
+    offset = dyn_h * (TITLE_PORTION);
     rect.h = static_cast<int>(dyn_h);
+    rect.y = static_cast<int>(offset*i);
     SDL_RenderDrawRect(renderer, &rect);
   }
 }
@@ -83,7 +85,7 @@ int main(int argc, char** argv) {
     Column col;
     Card sample_card;
     sample_card.w = 20; sample_card.h=30;
-    col.cards = {sample_card};
+    col.cards = {sample_card, sample_card, sample_card};
     col.borderColor = COLORS[i%4];
     col.x = 0; col.y =0;
     cols.push_back(col); 
