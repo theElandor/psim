@@ -38,36 +38,6 @@ std::string getCardImageURL(const std::string& jsonString) {
     return ""; // fallback
 }
 
-
-size_t WriteCallback(void* contents, size_t size, size_t nmemb, void* userp) {
-    size_t totalSize = size * nmemb;
-    std::vector<unsigned char>* buffer = static_cast<std::vector<unsigned char>*>(userp);
-    buffer->insert(buffer->end(), (unsigned char*)contents, (unsigned char*)contents + totalSize);
-    return totalSize;
-}
-
-std::vector<unsigned char> downloadImage(const std::string& url) {
-    CURL* curl = curl_easy_init();
-    std::vector<unsigned char> buffer;
-
-    if (curl) {
-        curl_easy_setopt(curl, CURLOPT_URL, url.c_str());
-
-        // Make sure to cast to curl_write_callback
-        curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, static_cast<size_t(*)(void*,size_t,size_t,void*)>(WriteCallback));
-        curl_easy_setopt(curl, CURLOPT_WRITEDATA, &buffer);
-
-        CURLcode res = curl_easy_perform(curl);
-        if (res != CURLE_OK) {
-            std::cerr << "curl_easy_perform() failed: " << curl_easy_strerror(res) << "\n";
-        }
-
-        curl_easy_cleanup(curl);
-    }
-
-    return buffer;
-}
-
 SDL_Texture* loadTextureFromMemory(SDL_Renderer* renderer, const std::vector<unsigned char>& imageData) {
     SDL_RWops* rw = SDL_RWFromConstMem(imageData.data(), imageData.size());
     if (!rw) {
@@ -88,23 +58,29 @@ SDL_Texture* loadTextureFromMemory(SDL_Renderer* renderer, const std::vector<uns
 }
 
 void render_column(SDL_Renderer* renderer, Column &c, int win_h, int col_width){
+  // renders the borders of columns.
   SDL_SetRenderDrawColor(renderer,
                          c.borderColor.r, c.borderColor.g, 
                          c.borderColor.b, 255);
   SDL_RenderDrawLine(renderer, c.x+PADDING/2, 0, c.x+PADDING/2, win_h);
   SDL_RenderDrawLine(renderer, c.x+col_width-PADDING/2, 0, c.x+col_width-PADDING/2, win_h);
 }
+
 void download_random_card(Card &card, SDL_Renderer* renderer){
+  // uses the scryfall api to download a random card and set 
+  // the texture. Used for debug purposes.
   ScryfallAPI api;
   std::cout<<"Downloading card information..."<<std::endl;
   std::string card_info = api.getRandomCard();
   std::string url = getCardImageURL(card_info);
-  auto imageData = downloadImage(url);
+  auto imageData = api.downloadImage(url);
   SDL_Texture *texture = loadTextureFromMemory(renderer,imageData); 
   card.texture = texture;
 }
+
 void render_cards(SDL_Renderer* renderer, Column &c, int win_h, int col_width){
-  SDL_SetRenderDrawColor(renderer,255,255,255,255); 
+  // renders the cards in each column
+  SDL_SetRenderDrawColor(renderer,0,0,0,255); 
   float offset;
   for(int i = 0; i < c.cards.size(); i++){
     SDL_Rect rect;
@@ -178,7 +154,7 @@ int main(int argc, char** argv) {
           std::cout << "Window resized to " << win_w << "x" << win_h << "\n";
       }
     }
-    // Clear with black background
+    // Clear with white background
     SDL_SetRenderDrawColor(renderer, 0, 0, 0, 255);
     SDL_RenderClear(renderer);
 
@@ -187,7 +163,7 @@ int main(int argc, char** argv) {
 
     for (int i = 0; i < num_cols; i++) {
         cols[i].x = i * col_width;
-        render_column(renderer, cols[i], win_h, col_width);
+        // render_column(renderer, cols[i], win_h, col_width);
         render_cards(renderer, cols[i], win_h, col_width);
     }
     SDL_RenderPresent(renderer);
