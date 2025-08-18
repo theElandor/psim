@@ -5,6 +5,7 @@
 #include <vector>
 #include "Scryfall.hpp"
 #include "Card.hpp"
+#include "Utils.hpp"
 #include <string>
 #include <curl/curl.h>
 #include <map>
@@ -15,6 +16,7 @@
 #define BUTTON_HEIGHT 30
 #define BUTTON_MARGIN 10
 #define PREVIEW_MARGIN 10
+#define SCROLL_BUFFER 400.0f
 
 // Temporarly copied function to debug in a easier way.
 // ====================================================
@@ -117,28 +119,6 @@ bool groupedByCMC = false;
 std::vector<RenderedCard> allCards; // Store all cards for regrouping
 RenderedCard* hoveredCard = nullptr; // Pointer to currently hovered card
 
-SDL_Texture* loadTextureFromMemory(SDL_Renderer* renderer, const std::vector<unsigned char>& imageData) {
-  /*
-   * AI generated. Returns a texture object given a buffer of data.
-   */
-  SDL_RWops* rw = SDL_RWFromConstMem(imageData.data(), imageData.size());
-  if (!rw) {
-    std::cerr << "SDL_RWFromConstMem failed: " << SDL_GetError() << "\n";
-    return nullptr;
-  }
-
-  SDL_Surface* surface = IMG_Load_RW(rw, 1); // 1 = SDL frees the RWops
-  if (!surface) {
-    std::cerr << "IMG_Load_RW failed: " << IMG_GetError() << "\n";
-    return nullptr;
-  }
-
-  SDL_Texture* texture = SDL_CreateTextureFromSurface(renderer, surface);
-  SDL_FreeSurface(surface);
-
-  return texture;
-}
-
 void render_column(SDL_Renderer* renderer, Column &c, int win_h, int col_width){
   /*
    * Renders the borders of the columns, which are the card containers.
@@ -169,14 +149,58 @@ void download_random_card(RenderedCard &card, SDL_Renderer* renderer){
   card.game_info.cmc = card_cmc;
 }
 
-bool point_in_rect(int x, int y, const SDL_Rect& rect) {
-  return x >= rect.x && x < rect.x + rect.w && y >= rect.y && y < rect.y + rect.h;
+// Calculate the total height needed for all cards in a column
+float calculate_column_content_height(const Column& c, int col_width) {
+  // tecnically: (number of cards - 1)*(card_height * TITLE_PORTION) + card_heigth
+  // might need to review this one.
+  if (c.cards.empty()) return 0; 
+  float dyn_h = ((float)(col_width) / 66) * 88;
+  float offset = dyn_h * TITLE_PORTION; 
+  return offset * c.cards.size();
 }
 
-void render_cards(SDL_Renderer* renderer, Column &c, int win_h, int col_width, int mouseX, int mouseY){
-  // renders the cards in each column
+// Get the maximum content height across all columns
+float get_max_content_height(const std::vector<Column>& cols, int col_width) {
+  float maxHeight = 0;
+  for (const auto& col : cols) {
+    float height = calculate_column_content_height(col, col_width);
+    maxHeight = std::max(maxHeight, height);
+  }
+  return maxHeight;
+}
+
+
+void clamp_scroll_offset(float &scrollOffset, int win_w, int win_h, int preview_width, 
+                        const std::vector<Column>& cols, size_t num_cols) {
+  int availableWidth = win_w - preview_width - PREVIEW_MARGIN;
+  int col_width = availableWidth / (num_cols > 0 ? num_cols : 1);
+  float maxContentHeight = get_max_content_height(cols, col_width);
+  float viewportHeight = win_h - BUTTON_HEIGHT - BUTTON_MARGIN;
+  
+  if (maxContentHeight > viewportHeight) {
+    float maxScroll = SCROLL_BUFFER;
+    float minScroll = viewportHeight - maxContentHeight - SCROLL_BUFFER;
+    scrollOffset = std::max(minScroll, std::min(maxScroll, scrollOffset));
+  } else {
+    // If content fits in viewport, reset scroll to 0
+    scrollOffset = 0.0f;
+  }
+}
+
+
+void render_cards(SDL_Renderer* renderer, Column &c, int win_h, int col_width, int mouseX, int mouseY, float scrollOffset){
+  // renders the cards in each column with scroll support
   SDL_SetRenderDrawColor(renderer,0,0,0,255); 
   float offset;
+  
+  // Create clipping rectangle for this column
+  SDL_Rect clipRect;
+  clipRect.x = c.x;
+  clipRect.y = 0;
+  clipRect.w = col_width;
+  clipRect.h = win_h - BUTTON_HEIGHT - BUTTON_MARGIN;
+  SDL_RenderSetClipRect(renderer, &clipRect);
+  
   for(int i = 0; i < c.cards.size(); i++){
     SDL_Rect rect;
     rect.x = c.x+PADDING/2;
@@ -185,19 +209,28 @@ void render_cards(SDL_Renderer* renderer, Column &c, int win_h, int col_width, i
     dyn_h = ((float)rect.w/66)*88;
     offset = dyn_h * (TITLE_PORTION);
     rect.h = static_cast<int>(dyn_h);
-    rect.y = static_cast<int>(offset*i); 
-    // Check if mouse is hovering over this card
-    if (point_in_rect(mouseX, mouseY, rect)) {
-      hoveredCard = &c.cards[i];
-      // Draw hover highlight
-      SDL_SetRenderDrawColor(renderer, 255, 255, 255, 100);
-      SDL_RenderDrawRect(renderer, &rect);
-      SDL_SetRenderDrawColor(renderer, 255, 255, 255, 50);
-      SDL_RenderFillRect(renderer, &rect);
+    rect.y = static_cast<int>(offset*i + scrollOffset);  // Apply scroll offset here
+    
+    // Only render if the card is visible (within the clipped area)
+    if (rect.y + rect.h > 0 && rect.y < win_h - BUTTON_HEIGHT - BUTTON_MARGIN) {
+      // Check if mouse is hovering over this card
+      if (point_in_rect(mouseX, mouseY, rect) && 
+          mouseY < win_h - BUTTON_HEIGHT - BUTTON_MARGIN) { // Don't hover if mouse is over button area
+        hoveredCard = &c.cards[i];
+        // Draw hover highlight
+        SDL_SetRenderDrawColor(renderer, 255, 255, 255, 100);
+        SDL_RenderDrawRect(renderer, &rect);
+        SDL_SetRenderDrawColor(renderer, 255, 255, 255, 50);
+        SDL_RenderFillRect(renderer, &rect);
+      }
+      SDL_RenderCopy(renderer, c.cards[i].texture, nullptr, &rect);
     }
-    SDL_RenderCopy(renderer, c.cards[i].texture, nullptr, &rect);
   }
+  
+  // Reset clipping
+  SDL_RenderSetClipRect(renderer, nullptr);
 }
+
 
 void render_button(SDL_Renderer* renderer, Button &button, TTF_Font* font) {
   // Determine button color based on state
@@ -316,7 +349,7 @@ void render_card_preview(SDL_Renderer* renderer, RenderedCard* card, int win_w, 
   }
 }
 
-void group_cards_by_cmc(std::vector<Column>& cols, const std::vector<RenderedCard>& cards, int num_cols) {
+void group_cards_by_cmc(std::vector<Column>& cols, const std::vector<RenderedCard>& cards, int num_cols, float &scrollOffset) {
   // Clear all columns
   for (auto& col : cols) {
     col.cards.clear();
@@ -338,10 +371,13 @@ void group_cards_by_cmc(std::vector<Column>& cols, const std::vector<RenderedCar
     cols[colIndex].cmc = pair.first;
     colIndex++;
   }
+  
+  // Reset scroll when grouping changes
+  scrollOffset = 0.0f;
 }
 
-void restore_original_layout(std::vector<Column>& cols, const std::vector<RenderedCard>& cards, int num_cols) {
-  // Clear all columns
+void restore_original_layout(std::vector<Column>& cols, const std::vector<RenderedCard>& cards, int num_cols, float &scrollOffset) {
+    // Clear all columns
   for (auto& col : cols) {
     col.cards.clear();
     col.cmc = -1;
@@ -358,6 +394,9 @@ void restore_original_layout(std::vector<Column>& cols, const std::vector<Render
         cols[i].cards.push_back(cards[cardIndex++]);
     }
   }
+  
+  // Reset scroll when grouping changes
+  scrollOffset = 0.0f;
 }
 
 void insert_set_in_col(SDL_Renderer* renderer, Column &col, std::vector<RenderedCard> &allCards, int size, Card *card){
@@ -462,6 +501,8 @@ int main(int argc, char** argv) {
   }
   int win_w = 1280;
   int win_h = 720;
+  float scrollOffset = 0.0f;
+  const float SCROLL_SPEED = 30.0f;
   int preview_width = win_w / 4;
   SDL_SetHint(SDL_HINT_VIDEO_X11_NET_WM_BYPASS_COMPOSITOR, "0");
   SDL_SetHint(SDL_HINT_RENDER_SCALE_QUALITY, "1"); 
@@ -550,7 +591,10 @@ int main(int argc, char** argv) {
         preview_width = win_w / 4;
         // Update button position
         cmcButton.rect.x = win_w - BUTTON_WIDTH - BUTTON_MARGIN;
-        cmcButton.rect.y = win_h - BUTTON_HEIGHT - BUTTON_MARGIN;  
+        cmcButton.rect.y = win_h - BUTTON_HEIGHT - BUTTON_MARGIN;
+        
+        // Fix scroll offset after resize
+        clamp_scroll_offset(scrollOffset, win_w, win_h, preview_width, cols, num_cols);
       }
       else if (e.type == SDL_MOUSEBUTTONDOWN) {
         if (e.button.button == SDL_BUTTON_LEFT) {
@@ -571,18 +615,35 @@ int main(int argc, char** argv) {
             groupedByCMC = !groupedByCMC;
             
             if (groupedByCMC) {
-              group_cards_by_cmc(cols, allCards, num_cols);
+              group_cards_by_cmc(cols, allCards, num_cols, scrollOffset);
               cmcButton.text = "Ungroup CMC";
               cmcButton.color = {255, 200, 200, 255}; // Light red when active
               cmcButton.hoverColor = {225, 170, 170, 255}; // Darker hover for active state
             } else {
-              restore_original_layout(cols, allCards, num_cols);
+              restore_original_layout(cols, allCards, num_cols, scrollOffset);
               cmcButton.text = "Group by CMC";
               cmcButton.color = {200, 200, 200, 255}; // Gray when inactive
               cmcButton.hoverColor = {170, 170, 170, 255}; // Darker hover for inactive state
             }
           }
           cmcButton.clicked = false;
+        }
+      }
+      else if (e.type == SDL_MOUSEWHEEL){
+          // Handle mouse wheel scrolling
+        int availableWidth = win_w - preview_width - PREVIEW_MARGIN;
+        int col_width = availableWidth / (num_cols > 0 ? num_cols : 1);
+        float maxContentHeight = get_max_content_height(cols, col_width);
+        float viewportHeight = win_h - BUTTON_HEIGHT - BUTTON_MARGIN;
+        
+        // Only allow scrolling if content is taller than viewport
+        if (maxContentHeight > viewportHeight) {
+          scrollOffset += e.wheel.y * SCROLL_SPEED;
+          
+          // Clamp scroll offset with buffer space
+          float maxScroll = SCROLL_BUFFER;  // Allow scrolling up beyond top
+          float minScroll = viewportHeight - maxContentHeight - SCROLL_BUFFER; 
+          scrollOffset = std::max(minScroll, std::min(maxScroll, scrollOffset));
         }
       }
     }
@@ -598,7 +659,7 @@ int main(int argc, char** argv) {
     for (int i = 0; i < num_cols; i++) {
       cols[i].x = i * col_width;
       // render_column(renderer, cols[i], win_h, col_width);
-      render_cards(renderer, cols[i], win_h, col_width, mouseX, mouseY);
+      render_cards(renderer, cols[i], win_h, col_width, mouseX, mouseY, scrollOffset);
     }
 
     // Render the card preview
