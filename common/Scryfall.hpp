@@ -1,7 +1,9 @@
 #include <iostream>
 #include <string>
 #include <curl/curl.h>
+#include <nlohmann/json.hpp>
 
+using json = nlohmann::json;
 /*
   Author: Matteo Lugli
   AI generated code to send requests to scryfall and get card information
@@ -131,6 +133,31 @@ public:
     std::string getCardById(const std::string& id) {
       return makeRequest("/cards/" + id);
     }
+
+  std::string getCardImageURL(const std::string& jsonString) {
+    auto j = json::parse(jsonString);
+    if (j.contains("image_uris") && j["image_uris"].contains("png")) {
+        return j["image_uris"]["png"].get<std::string>();
+    }
+    return ""; // fallback
+  }
+
+  std::string getCardName(const std::string& jsonString) {
+    auto j = json::parse(jsonString);
+    if (j.contains("name")) {
+        return j["name"].get<std::string>();
+    }
+    return ""; // fallback
+  }
+
+  unsigned getCardCmc(const std::string& jsonString) {
+    auto j = json::parse(jsonString);
+    if (j.contains("cmc")) {
+        return j["cmc"].get<int>();
+    }
+    return 0; // fallback
+  }
+
 };
 
 void printSeparator(const std::string& title) {

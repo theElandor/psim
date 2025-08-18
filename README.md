@@ -7,3 +7,5 @@ Run clients on two different terminals with `./client_app`.
 + nlohmann-json3-dev
 + libcurl4-openssl-dev    
 + libsdl2-ttf-dev
+# Compiling deck visualizer preview:
+g++ main.cpp -I ../common -lSDL2 -lSDL2_image -lSDL2_ttf -lcurl

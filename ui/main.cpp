@@ -392,7 +392,7 @@ int main(int argc, char** argv) {
                 e.window.event == SDL_WINDOWEVENT_SIZE_CHANGED)) {
         win_w = e.window.data1;  // updated width
         win_h = e.window.data2;  // updated height
-        
+        preview_width = win_w / 4;
         // Update button position
         cmcButton.rect.x = win_w - BUTTON_WIDTH - BUTTON_MARGIN;
         cmcButton.rect.y = win_h - BUTTON_HEIGHT - BUTTON_MARGIN;

@@ -5,6 +5,7 @@ class Card {
 public:
     std::string title;
     std::string effect;
+    int cmc;
     unsigned id;
 
     Card() = default;
