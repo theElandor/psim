@@ -10,14 +10,78 @@
 #include <map>
 
 #define PADDING 20
-#define TITLE_PORTION 0.2
+#define TITLE_PORTION 0.1
 #define BUTTON_WIDTH 120
 #define BUTTON_HEIGHT 30
 #define BUTTON_MARGIN 10
 #define PREVIEW_MARGIN 10
 
+// Temporarly copied function to debug in a easier way.
+// ====================================================
+std::string open_deck(){
+  std::cout << "Insert a valid deck path: ";
+  std::string path;
+  while (true) {
+    std::getline(std::cin, path);
+    std::ifstream is(path);
+    if (!is) {
+        std::cout<<"Invalid path. Try again: ";
+        continue;
+    }
+    
+    std::string contents((std::istreambuf_iterator<char>(is)),
+                       std::istreambuf_iterator<char>());
+    is.close();
+    return contents;
+  }
+  return "something went wrong";
+}
+std::pair<std::vector<Card>, std::vector<Card>> parse_deck(const std::string &raw_data){
+  /*
+    This function parses a deck in the standard MTGO format.
+    Probably needs extra refinment and security checks.
+    AI kinds of writes very convoluted code, so I wrote this myself.
+  */
+  std::vector<Card> main;
+  std::vector<Card> side;
+
+ // turn string into vector of cards and assign it to player.
+  std::cout<<"parse_deck -> starting deck_parsing..."<<std::endl;
+  std::stringstream is(raw_data);
+  std::string line;
+  int copies;
+  bool sideboard = false;
+  std::string name;
+  while(true){
+    if(!std::getline(is,line)){
+      std::cout<<"Reached end of list.\n";
+      return {main,side};
+    }
+    std::stringstream is_line(line);
+    is_line>>copies;
+    is_line.ignore(1);
+    if(!std::getline(is_line,name)){
+      std::cout<<"Something went wrong during parsing.\n";
+      return {{},{}};
+    }
+    for(int i = 0; i < copies; i++){
+      // add card to either sideboard or main deck
+      if(sideboard)
+        side.emplace_back(0, name, "", "", 0);
+      else
+        main.emplace_back(0, name, "", "", 0);
+    }
+    if((int)is.peek() == 13){
+      sideboard = true;
+      is.ignore(2); // ignore carriage return and newline.
+    }
+  } 
+  return {{},{}};
+}
+// ====================================================
+
 struct RenderedCard{
-  Card card;
+  Card game_info; // Changed from pointer to actual object
   SDL_Texture* texture;
   int w;
   int h;
@@ -54,6 +118,9 @@ std::vector<RenderedCard> allCards; // Store all cards for regrouping
 RenderedCard* hoveredCard = nullptr; // Pointer to currently hovered card
 
 SDL_Texture* loadTextureFromMemory(SDL_Renderer* renderer, const std::vector<unsigned char>& imageData) {
+  /*
+   * AI generated. Returns a texture object given a buffer of data.
+   */
   SDL_RWops* rw = SDL_RWFromConstMem(imageData.data(), imageData.size());
   if (!rw) {
     std::cerr << "SDL_RWFromConstMem failed: " << SDL_GetError() << "\n";
@@ -73,7 +140,10 @@ SDL_Texture* loadTextureFromMemory(SDL_Renderer* renderer, const std::vector<uns
 }
 
 void render_column(SDL_Renderer* renderer, Column &c, int win_h, int col_width){
-  // renders the borders of columns.
+  /*
+   * Renders the borders of the columns, which are the card containers.
+   * Made for debugging purposes.
+   */
   SDL_SetRenderDrawColor(renderer,
                          c.borderColor.r, c.borderColor.g, 
                          c.borderColor.b, 255);
@@ -82,19 +152,21 @@ void render_column(SDL_Renderer* renderer, Column &c, int win_h, int col_width){
 }
 
 void download_random_card(RenderedCard &card, SDL_Renderer* renderer){
-  // uses the scryfall api to download a random card and set 
-  // the texture. Used for debug purposes.
+  /*
+   * Downloads a random card and inserts the information in the
+   * card object. Made for debugging purposes as well.
+   */
   ScryfallAPI api;
   std::cout<<"Downloading card information..."<<std::endl;
   std::string card_info = api.getRandomCard();
   std::string url = api.getCardImageURL(card_info);
   std::string card_name = api.getCardName(card_info);
   int card_cmc = api.getCardCmc(card_info);
-  auto imageData = api.downloadImage(url);
+  auto imageData = api.downloadImageCached(url);
   SDL_Texture *texture = loadTextureFromMemory(renderer,imageData); 
   card.texture = texture;
-  card.card.title = card_name;
-  card.card.cmc = card_cmc;
+  card.game_info.title = card_name;
+  card.game_info.cmc = card_cmc;
 }
 
 bool point_in_rect(int x, int y, const SDL_Rect& rect) {
@@ -203,7 +275,7 @@ void render_card_preview(SDL_Renderer* renderer, RenderedCard* card, int win_w, 
     SDL_Color textColor = {255, 255, 255, 255};
     
     // Card name
-    SDL_Surface* nameSurface = TTF_RenderText_Solid(font, card->card.title.c_str(), textColor);
+    SDL_Surface* nameSurface = TTF_RenderText_Solid(font, card->game_info.title.c_str(), textColor);
     if (nameSurface) {
       SDL_Texture* nameTexture = SDL_CreateTextureFromSurface(renderer, nameSurface);
       if (nameTexture) {
@@ -225,7 +297,7 @@ void render_card_preview(SDL_Renderer* renderer, RenderedCard* card, int win_w, 
       SDL_FreeSurface(nameSurface);
     } 
       // CMC
-    std::string cmcText = "CMC: " + std::to_string(card->card.cmc);
+    std::string cmcText = "CMC: " + std::to_string(card->game_info.cmc);
     SDL_Surface* cmcSurface = TTF_RenderText_Solid(font, cmcText.c_str(), textColor);
     if (cmcSurface) {
       SDL_Texture* cmcTexture = SDL_CreateTextureFromSurface(renderer, cmcSurface);
@@ -254,7 +326,7 @@ void group_cards_by_cmc(std::vector<Column>& cols, const std::vector<RenderedCar
   // Group cards by CMC
   std::map<int, std::vector<RenderedCard>> cmcGroups;
   for (const auto& card : cards) {
-    cmcGroups[card.card.cmc].push_back(card);
+    cmcGroups[card.game_info.cmc].push_back(card);
   }
   
   // Distribute CMC groups to columns
@@ -288,8 +360,106 @@ void restore_original_layout(std::vector<Column>& cols, const std::vector<Render
   }
 }
 
+void insert_set_in_col(SDL_Renderer* renderer, Column &col, std::vector<RenderedCard> &allCards, int size, Card *card){
+  RenderedCard sample_card;
+  sample_card.game_info = *card; // Copy card data, not pointer assignment
+  ScryfallAPI api;
+  std::cout<<"Getting card information..."<<std::endl;
+  std::string card_info = api.getCardByName(sample_card.game_info.title); // Fixed: use card->title instead of undefined card_name
+  std::string url = api.getCardImageURL(card_info);
+  sample_card.game_info.cmc = api.getCardCmc(card_info);
+  // create texture
+  auto imageData = api.downloadImageCached(url);
+  SDL_Texture *texture = loadTextureFromMemory(renderer,imageData); 
+  sample_card.texture = texture; // Fixed: use sample_card instead of card
+  sample_card.w = 20; 
+  sample_card.h = 30;
+  for(int i = 0; i < size; i++){
+    col.cards.push_back(sample_card);
+    allCards.push_back(sample_card);
+  }
+}
+
+void initialize_columns(SDL_Renderer* renderer, std::vector<Column> &cols, std::vector<Card> &deck){
+  /*
+  * This function initially sorts the cards.
+  * Each column can contain up to 16 cards.
+  * Sets are not split onto multiple columns.
+  */
+  
+  // If deck is empty, create some sample cards for testing
+  if (deck.empty()) {
+    for (int i = 0; i < 24; i++) { // Create 24 random cards for testing
+      Column col;
+      col.borderColor = COLORS[i % 4];
+      col.x = 0; col.y = 0;
+      col.cmc = -1;
+      // Add 3 random cards to each column
+      for (int j = 0; j < 3; j++) {
+        RenderedCard sample_card;
+        download_random_card(sample_card, renderer);
+        sample_card.w = 20; 
+        sample_card.h = 30;
+        col.cards.push_back(sample_card);
+        allCards.push_back(sample_card);
+      }
+      cols.push_back(col);
+      if (cols.size() >= 8) break; // Limit to 8 columns for testing
+    }
+    return;
+  }
+  
+  int next_size = 1; // Fixed: initialize to 1, not 0
+  Column col;
+  col.borderColor = COLORS[0]; // Fixed: use valid index
+  col.x = 0; col.y = 0;
+  col.cmc = -1;
+  std::string next_set_name = deck[0].title; // Fixed: initialize with first card's title
+  
+  for(int i = 0; i < deck.size(); i++){
+    if(i == 0) {
+      // First card, initialize counters
+      next_size = 1;
+      next_set_name = deck[i].title;
+    }
+    else if(deck[i].title == next_set_name){ // Same card as previous
+      next_size++;
+    }
+    else{ // New card encountered
+      if(col.cards.size() + next_size <= 16){
+        // Insert these cards in current column
+        insert_set_in_col(renderer, col, allCards, next_size, &deck[i-1]); // Use previous card
+        next_size = 1;
+        next_set_name = deck[i].title;
+      }
+      else{ // Start new column
+        cols.push_back(col); 
+        // Initialize new column
+        col.cards.clear();
+        col.borderColor = COLORS[cols.size() % 4];
+        col.x = 0; col.y = 0;
+        col.cmc = -1;
+        insert_set_in_col(renderer, col, allCards, next_size, &deck[i-1]);
+        next_size = 1;
+        next_set_name = deck[i].title;
+      }
+    }
+  }
+  
+  // Don't forget to add the last batch of cards
+  if (next_size > 0 && !deck.empty()) {
+    insert_set_in_col(renderer, col, allCards, next_size, &deck.back());
+    cols.push_back(col);
+  }
+}
+
 int main(int argc, char** argv) {
-  // Prevent compositor transparency issues
+  // load deck to display
+  std::string raw_data = open_deck();
+  auto [sample_deck,side] = parse_deck(raw_data); 
+  for(auto &c:sample_deck){ 
+    std::cout<<c.title<<std::endl;
+  }
   int win_w = 1280;
   int win_h = 720;
   int preview_width = win_w / 4;
@@ -356,23 +526,8 @@ int main(int argc, char** argv) {
   cmcButton.clicked = false;
   
   // initialize columns
-  const int num_cols = 6;
-  for(int i = 0; i < num_cols; i++){
-    Column col;
-    RenderedCard sample_card;
-    download_random_card(sample_card, renderer);
-    sample_card.w = 20; sample_card.h=30;
-    col.cards = {sample_card, sample_card, sample_card};
-    col.borderColor = COLORS[i%4];
-    col.x = 0; col.y =0;
-    col.cmc = -1;
-    cols.push_back(col);
-    
-    // Store all cards for regrouping
-    for (const auto& card : col.cards) {
-        allCards.push_back(card);
-    }
-  } 
+  initialize_columns(renderer, cols, sample_deck);
+  size_t num_cols = cols.size();
   
   while (running) {
     // Get current mouse position for hover detection
@@ -395,9 +550,7 @@ int main(int argc, char** argv) {
         preview_width = win_w / 4;
         // Update button position
         cmcButton.rect.x = win_w - BUTTON_WIDTH - BUTTON_MARGIN;
-        cmcButton.rect.y = win_h - BUTTON_HEIGHT - BUTTON_MARGIN;
-        
-        std::cout << "Window resized to " << win_w << "x" << win_h << "\n";
+        cmcButton.rect.y = win_h - BUTTON_HEIGHT - BUTTON_MARGIN;  
       }
       else if (e.type == SDL_MOUSEBUTTONDOWN) {
         if (e.button.button == SDL_BUTTON_LEFT) {
@@ -440,7 +593,7 @@ int main(int argc, char** argv) {
 
     // Calculate available width for columns (excluding preview area)
     int availableWidth = win_w - preview_width - PREVIEW_MARGIN;
-    int col_width = availableWidth / num_cols;
+    int col_width = availableWidth / (num_cols > 0 ? num_cols : 1); // Prevent division by zero
 
     for (int i = 0; i < num_cols; i++) {
       cols[i].x = i * col_width;

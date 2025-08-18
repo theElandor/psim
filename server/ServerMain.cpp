@@ -108,8 +108,6 @@ void handle_accept(std::shared_ptr<Player> new_player,boost::system::error_code 
     players.push_back(new_player);
     connected_players++;
     std::cout << "Player " << new_player->id << " connected.\n";
-    // Initialize player info
-    initialize_player_info(*new_player);
     // Start reading from this player
     // Blocking operation: deck upload.
     start_read(new_player);
@@ -120,23 +118,6 @@ void handle_accept(std::shared_ptr<Player> new_player,boost::system::error_code 
     }
   } else {
     std::cerr << "Accept error: " << ec.message() << "\n";
-  }
-}
-
-void initialize_player_info(Player& player) {
-  // different cards are initialized for each player.
-  Card Forest_0("Forest", "", 0);
-  Card Mountain_0("Mountain", "",1);
-  Card LlanowarElves_0("Llanowar elves", "Tap to add 1 green", 2);
-
-  Card Forest_1("Forest", "", 3);
-  Card Mountain_1("Mountain", "",4);
-  Card LlanowarElves_1("Llanowar elves", "Tap to add 1 green", 5);
-
-  if (player.id == 0) {
-      player.info = {0, {Forest_0, Mountain_0, Forest_0}};
-  } else {
-      player.info = {1, {LlanowarElves_1, Forest_1}};
   }
 }
 
@@ -289,9 +270,9 @@ bool parse_deck(std::shared_ptr<Player> player, const Command& command){
     for(int i = 0; i < copies; i++){
       // add card to either sideboard or main deck
       if(sideboard)
-        player->sideboard.emplace_back(name, "", info.card_id++);
+        player->sideboard.emplace_back(info.card_id++, name, "", "", 0);
       else
-        player->deck.emplace_back(name, "", info.card_id++);
+        player->deck.emplace_back(info.card_id++, name, "", "", 0);
     }
     if((int)is.peek() == 13){
       sideboard = true;
@@ -299,7 +280,7 @@ bool parse_deck(std::shared_ptr<Player> player, const Command& command){
     }
   } 
   return false;
-} 
+}
 
 bool starts_with(const std::string& str, const std::string& prefix) {
     return str.size() >= prefix.size() &&
