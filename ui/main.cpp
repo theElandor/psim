@@ -113,24 +113,6 @@ void render_column(SDL_Renderer* renderer, Column &c, int win_h, int col_width){
   SDL_RenderDrawLine(renderer, c.x+col_width-PADDING/2, 0, c.x+col_width-PADDING/2, win_h);
 }
 
-void download_random_card(RenderedCard &card, SDL_Renderer* renderer){
-  /*
-   * Downloads a random card and inserts the information in the
-   * card object. Made for debugging purposes as well.
-   */
-  ScryfallAPI api;
-  std::cout<<"Downloading card information..."<<std::endl;
-  std::string card_info = api.getRandomCard();
-  std::string url = api.getCardImageURL(card_info);
-  std::string card_name = api.getCardName(card_info);
-  int card_cmc = api.getCardCmc(card_info);
-  auto imageData = api.downloadImageCached(url);
-  SDL_Texture *texture = loadTextureFromMemory(renderer,imageData); 
-  card.texture = texture;
-  card.game_info.title = card_name;
-  card.game_info.cmc = card_cmc;
-}
-
 // Calculate the total height needed for all cards in a column
 float calculate_column_content_height(const Column& c, int col_width) {
   // tecnically: (number of cards - 1)*(card_height * TITLE_PORTION) + card_heigth
@@ -371,29 +353,6 @@ void initialize_columns(SDL_Renderer* renderer, std::vector<Column> &cols, std::
   * Each column can contain up to 16 cards.
   * Sets are not split onto multiple columns.
   */
-  
-  // If deck is empty, create some sample cards for testing
-  if (deck.empty()) {
-    for (int i = 0; i < 24; i++) { // Create 24 random cards for testing
-      Column col;
-      col.borderColor = COLORS[i % 4];
-      col.x = 0; col.y = 0;
-      col.cmc = -1;
-      // Add 3 random cards to each column
-      for (int j = 0; j < 3; j++) {
-        RenderedCard sample_card;
-        download_random_card(sample_card, renderer);
-        sample_card.w = 20; 
-        sample_card.h = 30;
-        col.cards.push_back(sample_card);
-        allCards.push_back(sample_card);
-      }
-      cols.push_back(col);
-      if (cols.size() >= 8) break; // Limit to 8 columns for testing
-    }
-    return;
-  }
-  
   int next_size = 1; // Fixed: initialize to 1, not 0
   Column col;
   col.borderColor = COLORS[0]; // Fixed: use valid index
@@ -536,8 +495,7 @@ int main(int argc, char** argv) {
       else if (e.type == SDL_MOUSEBUTTONDOWN) {
         if (e.button.button == SDL_BUTTON_LEFT) {
           int clickX = e.button.x;
-          int clickY = e.button.y;
-          
+          int clickY = e.button.y; 
           if (point_in_rect(clickX, clickY, cmcButton.getRect())) {
             cmcButton.setClicked(true);
           }
