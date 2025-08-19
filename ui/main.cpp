@@ -85,13 +85,6 @@ struct Column{
   int cmc; // CMC value for this column when grouped
 };
 
-SDL_Color COLORS[4] = {
-    {255, 0, 0, 255},   // Red
-    {0, 255, 0, 255},   // Green
-    {0, 0, 255, 255},   // Blue
-    {255, 255, 0, 255}  // Yellow
-};
-
 bool groupedByCMC = false;
 std::vector<RenderedCard> allCards; // Store all cards for regrouping
 RenderedCard* hoveredCard = nullptr; // Pointer to currently hovered card
@@ -110,12 +103,11 @@ void render_column(SDL_Renderer* renderer, Column &c, int win_h, int col_width){
 
 // Calculate the total height needed for all cards in a column
 float calculate_column_content_height(const Column& c, int col_width) {
-  // tecnically: (number of cards - 1)*(card_height * TITLE_PORTION) + card_heigth
-  // might need to review this one.
-  if (c.cards.empty()) return 0; 
-  float dyn_h = ((float)(col_width) / 66) * 88;
-  float offset = dyn_h * TITLE_PORTION; 
-  return offset * c.cards.size();
+  if (c.cards.empty()) return 0;   
+  float card_height = ((float)(col_width) / 66) * 88;
+  float card_offset = card_height * TITLE_PORTION; 
+  // Total height = (number of cards - 1) * offset + full card height
+  return (c.cards.size() - 1) * card_offset + card_height;
 }
 
 // Get the maximum content height across all columns
@@ -128,24 +120,25 @@ float get_max_content_height(const std::vector<Column>& cols, int col_width) {
   return maxHeight;
 }
 
-
 void clamp_scroll_offset(float &scrollOffset, int win_w, int win_h, int preview_width, 
-                        const std::vector<Column>& cols, size_t num_cols) {
+                        const std::vector<Column>& cols, size_t num_cols) {    
+
   int availableWidth = win_w - preview_width - PREVIEW_MARGIN;
   int col_width = availableWidth / (num_cols > 0 ? num_cols : 1);
   float maxContentHeight = get_max_content_height(cols, col_width);
   float viewportHeight = win_h - BUTTON_HEIGHT - BUTTON_MARGIN;
   
-  if (maxContentHeight > viewportHeight) {
-    float maxScroll = SCROLL_BUFFER;
-    float minScroll = viewportHeight - maxContentHeight - SCROLL_BUFFER;
-    scrollOffset = std::max(minScroll, std::min(maxScroll, scrollOffset));
-  } else {
-    // If content fits in viewport, reset scroll to 0
-    scrollOffset = 0.0f;
-  }
+  if (maxContentHeight <= viewportHeight) {
+      // Content fits entirely in viewport - no scrolling needed
+      scrollOffset = 0.0f;
+      return;
+  } 
+  // Calculate scroll limits
+  float maxScrollUp = 0.0f;  // Can't scroll above the top of first card
+  float maxScrollDown = viewportHeight - maxContentHeight;  // Can scroll until last card is visible
+  // Clamp the scroll offset
+  scrollOffset = std::max(maxScrollDown, std::min(maxScrollUp, scrollOffset));
 }
-
 
 void render_cards(SDL_Renderer* renderer, Column &c, int win_h, int col_width, int mouseX, int mouseY, float scrollOffset){
   // renders the cards in each column with scroll support
@@ -264,7 +257,6 @@ void initialize_columns(SDL_Renderer* renderer, std::vector<Column> &cols, std::
   */
   int next_size = 1; // Fixed: initialize to 1, not 0
   Column col;
-  col.borderColor = COLORS[0]; // Fixed: use valid index
   col.x = 0; col.y = 0;
   col.cmc = -1;
   std::string next_set_name = deck[0].title; // Fixed: initialize with first card's title
@@ -289,7 +281,6 @@ void initialize_columns(SDL_Renderer* renderer, std::vector<Column> &cols, std::
         cols.push_back(col); 
         // Initialize new column
         col.cards.clear();
-        col.borderColor = COLORS[cols.size() % 4];
         col.x = 0; col.y = 0;
         col.cmc = -1;
         insert_set_in_col(renderer, col, allCards, next_size, &deck[i-1]);
@@ -433,25 +424,21 @@ int main(int argc, char** argv) {
           cmcButton.setClicked(false);
         }
       }
-      else if (e.type == SDL_MOUSEWHEEL){
-          // Handle mouse wheel scrolling
+      else if (e.type == SDL_MOUSEWHEEL) {
         int availableWidth = win_w - preview_width - PREVIEW_MARGIN;
         int col_width = availableWidth / (num_cols > 0 ? num_cols : 1);
         float maxContentHeight = get_max_content_height(cols, col_width);
         float viewportHeight = win_h - BUTTON_HEIGHT - BUTTON_MARGIN;
-        
         // Only allow scrolling if content is taller than viewport
         if (maxContentHeight > viewportHeight) {
-          scrollOffset += e.wheel.y * SCROLL_SPEED;
-          
-          // Clamp scroll offset with buffer space
-          float maxScroll = SCROLL_BUFFER;  // Allow scrolling up beyond top
-          float minScroll = viewportHeight - maxContentHeight - SCROLL_BUFFER; 
-          scrollOffset = std::max(minScroll, std::min(maxScroll, scrollOffset));
+            // Apply scroll movement
+            scrollOffset += e.wheel.y * SCROLL_SPEED;
+            // Clamp to valid range
+            clamp_scroll_offset(scrollOffset, win_w, win_h, preview_width, cols, num_cols);
         }
       }
     }
-    
+   
     // Clear with black background
     SDL_SetRenderDrawColor(renderer, 0, 0, 0, 255);
     SDL_RenderClear(renderer);
@@ -473,6 +460,7 @@ int main(int argc, char** argv) {
     // Render the CMC grouping button
     cmcButton.render(renderer, font); 
     SDL_RenderPresent(renderer);
+    SDL_Delay(16);
   }
 
   if (font) {
