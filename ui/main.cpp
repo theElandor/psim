@@ -6,16 +6,15 @@
 #include "Scryfall.hpp"
 #include "Card.hpp"
 #include "Utils.hpp"
+#include "Button.hpp"
 #include <string>
 #include <curl/curl.h>
 #include <map>
-
 #define PADDING 20
 #define TITLE_PORTION 0.1
+#define PREVIEW_MARGIN 10
 #define BUTTON_WIDTH 120
 #define BUTTON_HEIGHT 30
-#define BUTTON_MARGIN 10
-#define PREVIEW_MARGIN 10
 #define SCROLL_BUFFER 400.0f
 
 // Temporarly copied function to debug in a easier way.
@@ -39,11 +38,6 @@ std::string open_deck(){
   return "something went wrong";
 }
 std::pair<std::vector<Card>, std::vector<Card>> parse_deck(const std::string &raw_data){
-  /*
-    This function parses a deck in the standard MTGO format.
-    Probably needs extra refinment and security checks.
-    AI kinds of writes very convoluted code, so I wrote this myself.
-  */
   std::vector<Card> main;
   std::vector<Card> side;
 
@@ -94,18 +88,6 @@ struct Column{
   SDL_Color borderColor;
   int x,y;
   int cmc; // CMC value for this column when grouped
-};
-
-struct Button {
-  SDL_Rect rect;
-  bool pressed;
-  bool hovered;
-  bool clicked;
-  std::string text;
-  SDL_Color color;
-  SDL_Color hoverColor;
-  SDL_Color clickColor;
-  SDL_Color textColor;
 };
 
 SDL_Color COLORS[4] = {
@@ -229,42 +211,6 @@ void render_cards(SDL_Renderer* renderer, Column &c, int win_h, int col_width, i
   
   // Reset clipping
   SDL_RenderSetClipRect(renderer, nullptr);
-}
-
-
-void render_button(SDL_Renderer* renderer, Button &button, TTF_Font* font) {
-  // Determine button color based on state
-  SDL_Color currentColor = button.color;
-  if (button.clicked) {
-    currentColor = button.clickColor;
-  } else if (button.hovered) {
-    currentColor = button.hoverColor;
-  }
-  // Render button background
-  SDL_SetRenderDrawColor(renderer, currentColor.r, currentColor.g, currentColor.b, currentColor.a);
-  SDL_RenderFillRect(renderer, &button.rect);
-  // Render button border
-  SDL_SetRenderDrawColor(renderer, 0, 0, 0, 255);
-  SDL_RenderDrawRect(renderer, &button.rect);
-  // Render button text if font is available
-  if (font) {
-    SDL_Surface* textSurface = TTF_RenderText_Solid(font, button.text.c_str(), button.textColor);
-    if (textSurface) {
-      SDL_Texture* textTexture = SDL_CreateTextureFromSurface(renderer, textSurface);
-      if (textTexture) {
-        // Center text in button
-        SDL_Rect textRect;
-        textRect.w = textSurface->w;
-        textRect.h = textSurface->h;
-        textRect.x = button.rect.x + (button.rect.w - textRect.w) / 2;
-        textRect.y = button.rect.y + (button.rect.h - textRect.h) / 2;
-        
-        SDL_RenderCopy(renderer, textTexture, nullptr, &textRect);
-        SDL_DestroyTexture(textTexture);
-      }
-      SDL_FreeSurface(textSurface);
-    }
-  }
 }
 
 void render_card_preview(SDL_Renderer* renderer, RenderedCard* card, int win_w, int win_h, int preview_width, TTF_Font* font) {
@@ -493,12 +439,11 @@ void initialize_columns(SDL_Renderer* renderer, std::vector<Column> &cols, std::
 }
 
 int main(int argc, char** argv) {
-  // load deck to display
+  // deck parsing
   std::string raw_data = open_deck();
   auto [sample_deck,side] = parse_deck(raw_data); 
-  for(auto &c:sample_deck){ 
-    std::cout<<c.title<<std::endl;
-  }
+
+  // initialize stuff
   int win_w = 1280;
   int win_h = 720;
   float scrollOffset = 0.0f;
@@ -540,8 +485,9 @@ int main(int argc, char** argv) {
     return -1;
   }
   SDL_SetWindowOpacity(window, 1.0f);  // force opaque
+  // without VSYNC it's a lot faster!
   SDL_Renderer* renderer = SDL_CreateRenderer(window, -1,
-                                              SDL_RENDERER_ACCELERATED | SDL_RENDERER_PRESENTVSYNC);
+                                              SDL_RENDERER_ACCELERATED);
   if (!renderer) {
     std::cout << "Failed to create renderer\n";
     SDL_DestroyWindow(window);
@@ -555,16 +501,11 @@ int main(int argc, char** argv) {
   std::vector<Column> cols;
   
   // Create CMC grouping button
-  Button cmcButton;
-  cmcButton.rect = {win_w - BUTTON_WIDTH - BUTTON_MARGIN, win_h - BUTTON_HEIGHT - BUTTON_MARGIN, BUTTON_WIDTH, BUTTON_HEIGHT};
-  cmcButton.text = "Group by CMC";
-  cmcButton.color = {200, 200, 200, 255};         // Normal color
-  cmcButton.hoverColor = {170, 170, 170, 255};    // Darker when hovered
-  cmcButton.clickColor = {255, 255, 0, 255};      // Yellow when clicked
-  cmcButton.textColor = {0, 0, 0, 255};
-  cmcButton.pressed = false;
-  cmcButton.hovered = false;
-  cmcButton.clicked = false;
+  Button cmcButton (win_w - BUTTON_WIDTH - BUTTON_MARGIN, 
+        win_h - BUTTON_HEIGHT - BUTTON_MARGIN, 
+        BUTTON_WIDTH, BUTTON_HEIGHT,
+        "Group by CMC");
+
   
   // initialize columns
   initialize_columns(renderer, cols, sample_deck);
@@ -574,11 +515,8 @@ int main(int argc, char** argv) {
     // Get current mouse position for hover detection
     int mouseX, mouseY;
     SDL_GetMouseState(&mouseX, &mouseY);
-    cmcButton.hovered = point_in_rect(mouseX, mouseY, cmcButton.rect);
-    
-    // Reset hovered card each frame
-    hoveredCard = nullptr;
-    
+    cmcButton.setHovered(point_in_rect(mouseX, mouseY, cmcButton.getRect())); 
+    hoveredCard = nullptr; 
     while (SDL_PollEvent(&e)) {
       if (e.type == SDL_QUIT) {
         running = false;
@@ -590,9 +528,8 @@ int main(int argc, char** argv) {
         win_h = e.window.data2;  // updated height
         preview_width = win_w / 4;
         // Update button position
-        cmcButton.rect.x = win_w - BUTTON_WIDTH - BUTTON_MARGIN;
-        cmcButton.rect.y = win_h - BUTTON_HEIGHT - BUTTON_MARGIN;
-        
+        cmcButton.setPosition(win_w - BUTTON_WIDTH - BUTTON_MARGIN,
+                              win_h - BUTTON_HEIGHT - BUTTON_MARGIN);
         // Fix scroll offset after resize
         clamp_scroll_offset(scrollOffset, win_w, win_h, preview_width, cols, num_cols);
       }
@@ -601,8 +538,8 @@ int main(int argc, char** argv) {
           int clickX = e.button.x;
           int clickY = e.button.y;
           
-          if (point_in_rect(clickX, clickY, cmcButton.rect)) {
-            cmcButton.clicked = true;
+          if (point_in_rect(clickX, clickY, cmcButton.getRect())) {
+            cmcButton.setClicked(true);
           }
         }
       }
@@ -611,22 +548,22 @@ int main(int argc, char** argv) {
           int releaseX = e.button.x;
           int releaseY = e.button.y;
           
-          if (cmcButton.clicked && point_in_rect(releaseX, releaseY, cmcButton.rect)) {
+          if (cmcButton.isClicked() && point_in_rect(releaseX, releaseY, cmcButton.getRect())) {
             groupedByCMC = !groupedByCMC;
             
             if (groupedByCMC) {
               group_cards_by_cmc(cols, allCards, num_cols, scrollOffset);
-              cmcButton.text = "Ungroup CMC";
-              cmcButton.color = {255, 200, 200, 255}; // Light red when active
-              cmcButton.hoverColor = {225, 170, 170, 255}; // Darker hover for active state
+              cmcButton.setText("Ungroup CMC");
+              cmcButton.setColor({255, 200, 200, 255});
+              cmcButton.setHoverColor({225, 170, 170, 255});
             } else {
               restore_original_layout(cols, allCards, num_cols, scrollOffset);
-              cmcButton.text = "Group by CMC";
-              cmcButton.color = {200, 200, 200, 255}; // Gray when inactive
-              cmcButton.hoverColor = {170, 170, 170, 255}; // Darker hover for inactive state
+              cmcButton.setText("Group by CMC");
+              cmcButton.setColor({200, 200, 200, 255}); // Gray when inactive
+              cmcButton.setHoverColor({170, 170, 170, 255}); // Darker hover for inactive state
             }
           }
-          cmcButton.clicked = false;
+          cmcButton.setClicked(false);
         }
       }
       else if (e.type == SDL_MOUSEWHEEL){
@@ -666,8 +603,7 @@ int main(int argc, char** argv) {
     render_card_preview(renderer, hoveredCard, win_w, win_h, preview_width, font);
  
     // Render the CMC grouping button
-    render_button(renderer, cmcButton, font);
-    
+    cmcButton.render(renderer, font); 
     SDL_RenderPresent(renderer);
   }
 
