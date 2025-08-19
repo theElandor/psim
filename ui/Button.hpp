@@ -3,8 +3,6 @@
 #include <SDL2/SDL.h>
 #include <SDL2/SDL_ttf.h>
 
-#define BUTTON_MARGIN 10
-
 class Button {
 public:
     Button(int x, int y, int w, int h,

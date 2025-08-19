@@ -3,10 +3,12 @@
 #include <SDL2/SDL_image.h>
 #include <SDL2/SDL_ttf.h>
 #include <vector>
+#include "Preview.hpp"
 #include "Scryfall.hpp"
 #include "Card.hpp"
 #include "Utils.hpp"
 #include "Button.hpp"
+#include "RenderedCard.hpp"
 #include <string>
 #include <curl/curl.h>
 #include <map>
@@ -15,6 +17,7 @@
 #define PREVIEW_MARGIN 10
 #define BUTTON_WIDTH 120
 #define BUTTON_HEIGHT 30
+#define BUTTON_MARGIN 10
 #define SCROLL_BUFFER 400.0f
 
 // Temporarly copied function to debug in a easier way.
@@ -75,14 +78,6 @@ std::pair<std::vector<Card>, std::vector<Card>> parse_deck(const std::string &ra
   return {{},{}};
 }
 // ====================================================
-
-struct RenderedCard{
-  Card game_info; // Changed from pointer to actual object
-  SDL_Texture* texture;
-  int w;
-  int h;
-};
-
 struct Column{
   std::vector<RenderedCard> cards;
   SDL_Color borderColor;
@@ -182,10 +177,6 @@ void render_cards(SDL_Renderer* renderer, Column &c, int win_h, int col_width, i
           mouseY < win_h - BUTTON_HEIGHT - BUTTON_MARGIN) { // Don't hover if mouse is over button area
         hoveredCard = &c.cards[i];
         // Draw hover highlight
-        SDL_SetRenderDrawColor(renderer, 255, 255, 255, 100);
-        SDL_RenderDrawRect(renderer, &rect);
-        SDL_SetRenderDrawColor(renderer, 255, 255, 255, 50);
-        SDL_RenderFillRect(renderer, &rect);
       }
       SDL_RenderCopy(renderer, c.cards[i].texture, nullptr, &rect);
     }
@@ -193,88 +184,6 @@ void render_cards(SDL_Renderer* renderer, Column &c, int win_h, int col_width, i
   
   // Reset clipping
   SDL_RenderSetClipRect(renderer, nullptr);
-}
-
-void render_card_preview(SDL_Renderer* renderer, RenderedCard* card, int win_w, int win_h, int preview_width, TTF_Font* font) {
-  if (!card) return;
-  
-  // Calculate preview area
-  SDL_Rect previewArea;
-  previewArea.x = win_w - preview_width - PREVIEW_MARGIN;
-  previewArea.y = PREVIEW_MARGIN;
-  previewArea.w = preview_width;
-  previewArea.h = win_h - 2 * PREVIEW_MARGIN - BUTTON_HEIGHT - BUTTON_MARGIN;
-  
-  // Draw preview background
-  SDL_SetRenderDrawColor(renderer, 40, 40, 40, 200);
-  SDL_RenderFillRect(renderer, &previewArea);
-  SDL_SetRenderDrawColor(renderer, 255, 255, 255, 255);
-  SDL_RenderDrawRect(renderer, &previewArea);
-  
-  // Calculate card dimensions maintaining aspect ratio
-  float cardAspect = 66.0f / 88.0f; // Magic card aspect ratio
-  int cardWidth = previewArea.w - 2 * PREVIEW_MARGIN;
-  int cardHeight = static_cast<int>(cardWidth / cardAspect);
-  
-  // If card is too tall, scale by height instead
-  if (cardHeight > previewArea.h - 100) { // Leave space for text
-      cardHeight = previewArea.h - 100;
-      cardWidth = static_cast<int>(cardHeight * cardAspect);
-  }
-  
-  SDL_Rect cardRect;
-  cardRect.x = previewArea.x + (previewArea.w - cardWidth) / 2;
-  cardRect.y = previewArea.y + PREVIEW_MARGIN;
-  cardRect.w = cardWidth;
-  cardRect.h = cardHeight;
-  
-  // Render the card
-  SDL_RenderCopy(renderer, card->texture, nullptr, &cardRect);
-  
-  // Render card information text
-  if (font) {
-    SDL_Color textColor = {255, 255, 255, 255};
-    
-    // Card name
-    SDL_Surface* nameSurface = TTF_RenderText_Solid(font, card->game_info.title.c_str(), textColor);
-    if (nameSurface) {
-      SDL_Texture* nameTexture = SDL_CreateTextureFromSurface(renderer, nameSurface);
-      if (nameTexture) {
-          SDL_Rect nameRect;
-          nameRect.w = nameSurface->w;
-          nameRect.h = nameSurface->h;
-          nameRect.x = previewArea.x + (previewArea.w - nameRect.w) / 2;
-          nameRect.y = cardRect.y + cardRect.h + 10;
-          
-          // Ensure text fits within preview area
-          if (nameRect.w > previewArea.w - 20) {
-              nameRect.w = previewArea.w - 20;
-              nameRect.x = previewArea.x + 10;
-          }
-          
-          SDL_RenderCopy(renderer, nameTexture, nullptr, &nameRect);
-          SDL_DestroyTexture(nameTexture);
-      }
-      SDL_FreeSurface(nameSurface);
-    } 
-      // CMC
-    std::string cmcText = "CMC: " + std::to_string(card->game_info.cmc);
-    SDL_Surface* cmcSurface = TTF_RenderText_Solid(font, cmcText.c_str(), textColor);
-    if (cmcSurface) {
-      SDL_Texture* cmcTexture = SDL_CreateTextureFromSurface(renderer, cmcSurface);
-      if (cmcTexture) {
-          SDL_Rect cmcRect;
-          cmcRect.w = cmcSurface->w;
-          cmcRect.h = cmcSurface->h;
-          cmcRect.x = previewArea.x + (previewArea.w - cmcRect.w) / 2;
-          cmcRect.y = cardRect.y + cardRect.h + 35;
-          
-          SDL_RenderCopy(renderer, cmcTexture, nullptr, &cmcRect);
-          SDL_DestroyTexture(cmcTexture);
-        }
-      SDL_FreeSurface(cmcSurface);
-    }
-  }
 }
 
 void group_cards_by_cmc(std::vector<Column>& cols, const std::vector<RenderedCard>& cards, int num_cols, float &scrollOffset) {
@@ -401,7 +310,7 @@ int main(int argc, char** argv) {
   // deck parsing
   std::string raw_data = open_deck();
   auto [sample_deck,side] = parse_deck(raw_data); 
-
+  // render_card_preview(renderer, hoveredCard, win_w, win_h, preview_width, font);
   // initialize stuff
   int win_w = 1280;
   int win_h = 720;
@@ -465,7 +374,7 @@ int main(int argc, char** argv) {
         BUTTON_WIDTH, BUTTON_HEIGHT,
         "Group by CMC");
 
-  
+  CardPreview preview(renderer, font, win_w, win_h, win_h - BUTTON_WIDTH - BUTTON_MARGIN);
   // initialize columns
   initialize_columns(renderer, cols, sample_deck);
   size_t num_cols = cols.size();
@@ -550,7 +459,6 @@ int main(int argc, char** argv) {
     // Calculate available width for columns (excluding preview area)
     int availableWidth = win_w - preview_width - PREVIEW_MARGIN;
     int col_width = availableWidth / (num_cols > 0 ? num_cols : 1); // Prevent division by zero
-
     for (int i = 0; i < num_cols; i++) {
       cols[i].x = i * col_width;
       // render_column(renderer, cols[i], win_h, col_width);
@@ -558,7 +466,9 @@ int main(int argc, char** argv) {
     }
 
     // Render the card preview
-    render_card_preview(renderer, hoveredCard, win_w, win_h, preview_width, font);
+    preview.setWindowSize(win_w, win_h-BUTTON_HEIGHT-BUTTON_MARGIN, preview_width);
+    preview.render(hoveredCard);
+    // render_card_preview(renderer, hoveredCard, win_w, win_h, preview_width, font);
  
     // Render the CMC grouping button
     cmcButton.render(renderer, font); 
