@@ -4,6 +4,8 @@
 struct PlayerInfo {
     unsigned player_id; // 0 or 1 in two player game
     std::vector<Card> hand_cards;
+    std::vector<Card> main;
+    std::vector<Card> side;
 };
 
 

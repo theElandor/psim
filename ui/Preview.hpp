@@ -48,6 +48,7 @@ public:
 
         // Render the card
         SDL_RenderCopy(renderer, card->texture, nullptr, &cardRect);
+
         if (font) {
             SDL_Color textColor = {255, 255, 255, 255};
 

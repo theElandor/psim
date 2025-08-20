@@ -1,3 +1,4 @@
+#include <SDL2/SDL_events.h>
 #include <iostream>
 #include <iterator>
 #include <string>
@@ -16,77 +17,77 @@
 #include "PlayerInfo.hpp"
 #include "sprites.hpp"
 #include "Command.hpp"
+#include "DeckVisualizer.hpp"
+#include "Messages.hpp"
 
 using boost::asio::ip::tcp;
 using json = nlohmann::json;
 
 // UI Constants
-const int WINDOW_WIDTH = 1000;
-const int WINDOW_HEIGHT = 700;
-const int CONSOLE_HEIGHT = 200;
-const int INPUT_HEIGHT = 30;
 const int MARGIN = 10;
 
 class GameClient {
 private:
-    boost::asio::io_context io_context;
-    tcp::socket socket;
-    PlayerInfo player_info;
-    PublicInfo info;
-    std::atomic<bool> connected;
-    std::vector<char> read_buffer;
-    uint32_t expected_message_length;
-    bool reading_header;
-    std::atomic<bool> has_priority;
-    std::vector<CommandCode> available_commands;
-    
-    // Thread management
-    std::thread network_thread;
-    std::mutex data_mutex;
-    
-    // Message queue for UI thread
-    std::queue<std::string> message_queue;
-    std::mutex queue_mutex;
+  boost::asio::io_context io_context;
+  tcp::socket socket;
+  PublicInfo info;
+  std::atomic<bool> connected;
+  std::vector<char> read_buffer;
+  uint32_t expected_message_length;
+  std::atomic<bool> has_priority;
+  std::vector<CommandCode> available_commands;
+  std::string last_deck;
+  
+  // Thread management
+  std::thread network_thread;
+  std::mutex data_mutex;
+  
+  // Message queue for UI thread
+  std::queue<std::string> message_queue;
+  std::mutex queue_mutex;
     
 public:
+    PlayerInfo player_info;
     GameClient() 
-        : socket(io_context), connected(false), 
-          expected_message_length(0), reading_header(true), 
-          has_priority(false) {
-        read_buffer.resize(65536); // 64KB buffer
+    : socket(io_context), connected(false), 
+      expected_message_length(0), 
+      has_priority(false) {
+      read_buffer.resize(65536); // 64KB buffer
     }
     
     ~GameClient() {
-        disconnect();
-        if (network_thread.joinable()) {
-            network_thread.join();
-        }
+      disconnect();
+      if (network_thread.joinable()) {
+        network_thread.join();
+      }
     }
- 
+    std::vector<Card> get_main(){
+      return player_info.main; 
+    } 
     void connect_to_server(const std::string& host, int port) {
-        try {
-            auto endpoint = tcp::endpoint(boost::asio::ip::make_address(host), port);
-            socket.connect(endpoint);
-            connected = true;
-            
-            // Start network thread
-            network_thread = std::thread([this]() {
-                network_loop();
-            });
-        } catch (const std::exception& e) {
-            std::cerr << "Connection failed: " << e.what() << "\n";
-            connected = false;
-        }
+      try {
+        auto endpoint = tcp::endpoint(boost::asio::ip::make_address(host), port);
+        socket.connect(endpoint);
+        connected = true;
+        
+        // Start network thread
+        network_thread = std::thread([this]() {
+            network_loop();
+        });
+      } catch (const std::exception& e) {
+        std::cerr << "Connection failed: " << e.what() << "\n";
+        connected = false;
+      }
     }
 
     void disconnect() {
-        if (connected) {
-            connected = false;
-            try {
-                socket.close();
-            } catch (...) {}
-            io_context.stop();
-        }
+      if (connected) {
+        connected = false;
+        try {
+            socket.close();
+        } catch (...) {}
+        io_context.stop();
+      }
     }
 
     void send_command(const Command& command) {
@@ -110,7 +111,7 @@ public:
                 // Send message
                 boost::asio::write(socket, boost::asio::buffer(json_str));
                 
-                push_message("Command sent: " + command.toString());
+                // push_message("Command sent: " + command.toString());
             } catch (const std::exception& e) {
                 push_message("Send error: " + std::string(e.what()));
                 handle_disconnect();
@@ -164,7 +165,8 @@ public:
                     cmd.code = CommandCode::Invalid; // Mark as invalid
                 } else {
                     cmd.target = contents;
-                    push_message("Deck loaded successfully");
+                    last_deck = contents;
+                    push_message("[create_command_from_input]: Deck opened successfully");
                 }
                 break;
             }   
@@ -215,17 +217,56 @@ private:
             });
     }
     
+    bool parse_deck(std::string &raw_data){
+     // turn string into vector of cards and assign it to player.
+      std::cout<<"parse_deck -> starting deck_parsing..."<<std::endl;
+      std::stringstream is(raw_data);
+      std::string line;
+      int copies;
+      bool sideboard = false;
+      std::string name;
+      while(true){
+        if(!std::getline(is,line)){
+          std::cout<<"Reached end of list.\n";
+          return true;
+        }
+        std::stringstream is_line(line);
+        is_line>>copies;
+        is_line.ignore(1);
+        if(!std::getline(is_line,name)){
+          std::cout<<"Something went wrong during parsing.\n";
+          return false;
+        }
+        for(int i = 0; i < copies; i++){
+          // add card to either sideboard or main deck
+          if(sideboard)
+            player_info.side.emplace_back(0, name, "", "", 0);
+          else
+            player_info.main.emplace_back(0, name, "", "", 0);
+        }
+        if((int)is.peek() == 13){
+          sideboard = true;
+          is.ignore(2); // ignore carriage return and newline.
+        }
+      } 
+      return false;
+    }
+   
     void handle_message(const std::string& message) {
         // Push message to queue for UI thread to process
         push_message("Server: " + message);
-        
+        std::cout<<"[handle_message]: received " + message + "\n"; 
         // Handle priority updates
         if (message == "You have priority") {
             has_priority = true;
         } else if (message.find("priority passed") != std::string::npos) {
             has_priority = false;
         }
-        
+        else if (message == MESSAGE_correct_deck_upload){
+          if(parse_deck(last_deck)){
+            std::cout<<"[handle_message] Parsing succeded.\n";
+          }
+        } 
         // Try to parse as JSON for game state updates
         try {
             nlohmann::json j = nlohmann::json::parse(message);
@@ -270,13 +311,13 @@ private:
     
 public:
     TextInput() : active(false) {}
-    
+    // Just handles the text addition and deletion with backspace. 
     void handle_event(SDL_Event& e) {
         if (e.type == SDL_TEXTINPUT && active) {
             text += e.text.text;
         } else if (e.type == SDL_KEYDOWN && active) {
             if (e.key.keysym.sym == SDLK_BACKSPACE && !text.empty()) {
-                text.pop_back();
+              text.pop_back();
             }
         }
     }
@@ -308,209 +349,218 @@ public:
 };
 
 int main() {
+    // const int CONSOLE_HEIGHT = 200;
+    // const int INPUT_HEIGHT = 30;
+    int window_w = 1000;
+    int window_h = 700;
+    int console_h = window_h / 4;
+    int input_h = console_h / 5;
+    SDL_Rect main_area;
+    main_area.x = 0; main_area.y=0;
+    main_area.h = window_h - console_h-input_h;
+    main_area.w = window_w;
     try {
-        GameClient client;
-        
-        // Initialize SDL and SDL_ttf
-        if (SDL_Init(SDL_INIT_VIDEO) < 0) {
-            std::cerr << "SDL could not initialize! SDL_Error: " << SDL_GetError() << "\n";
-            return 1;
-        }
-        
-        if (TTF_Init() == -1) {
-            std::cerr << "TTF could not initialize! TTF_Error: " << TTF_GetError() << "\n";
-            SDL_Quit();
-            return 1;
-        }
-        
-        // Create window and renderer
-        SDL_Window* window = SDL_CreateWindow("Game Client", 
-                                            SDL_WINDOWPOS_UNDEFINED, 
-                                            SDL_WINDOWPOS_UNDEFINED, 
-                                            WINDOW_WIDTH, WINDOW_HEIGHT, 
-                                            SDL_WINDOW_SHOWN);
-        if (!window) {
-            std::cerr << "Window could not be created! SDL_Error: " << SDL_GetError() << "\n";
-            TTF_Quit();
-            SDL_Quit();
-            return 1;
-        }
-        
-        SDL_Renderer* renderer = SDL_CreateRenderer(window, -1, SDL_RENDERER_ACCELERATED);
-        if (!renderer) {
-            std::cerr << "Renderer could not be created! SDL_Error: " << SDL_GetError() << "\n";
-            SDL_DestroyWindow(window);
-            TTF_Quit();
-            SDL_Quit();
-            return 1;
-        }
-        
-        // Load font
-        TTF_Font* font = TTF_OpenFont("arial.ttf", 16);
-        if (!font) {
-            // Try fallback font
-            font = TTF_OpenFont("/usr/share/fonts/truetype/freefont/FreeMono.ttf", 16);
-            if (!font) {
-                std::cerr << "Failed to load font! TTF_Error: " << TTF_GetError() << "\n";
-                SDL_DestroyRenderer(renderer);
-                SDL_DestroyWindow(window);
-                TTF_Quit();
-                SDL_Quit();
-                return 1;
-            }
-        }
-        
-        // UI components
-        TextInput text_input;
-        MessageLog message_log;
-        
-        // Connect to server
-        client.connect_to_server("127.0.0.1", 5000);
-        message_log.add_message("Connecting to server...");
-        
-        // Main game loop
-        bool quit = false;
-        SDL_Event e;
-        
-        while (!quit) {
-            // Process events
-            while (SDL_PollEvent(&e) != 0) {
-                if (e.type == SDL_QUIT) {
-                    quit = true;
-                } else if (e.type == SDL_MOUSEBUTTONDOWN) {
-                    // Toggle text input focus
-                    SDL_Point mouse_pos = {e.button.x, e.button.y};
-                    SDL_Rect input_rect = {MARGIN, WINDOW_HEIGHT - INPUT_HEIGHT - MARGIN, 
-                                         WINDOW_WIDTH - 2*MARGIN, INPUT_HEIGHT};
-                    text_input.set_active(SDL_PointInRect(&mouse_pos, &input_rect));
-                } else if (e.type == SDL_KEYDOWN) {
-                    if (e.key.keysym.sym == SDLK_RETURN && text_input.is_active()) {
-                        // Send command
-                        std::string command_text = text_input.get_text();
-                        if (!command_text.empty()) {
-                            message_log.add_message("You: " + command_text);
-                            
-                            // Handle special commands
-                            if (command_text == "quit") {
-                                client.send_command(Command(CommandCode::Quit));
-                            } else if (command_text == "resign") {
-                                client.send_command(Command(CommandCode::Resign));
-                            } else if (command_text == "pass") {
-                                client.send_command(Command(CommandCode::PassPriority));
-                            } else if (command_text.find("upload ") == 0) {
-                                std::string path = command_text.substr(7);
-                                Command cmd = client.create_command_from_input(CommandCode::UploadDeck, path);
-                                if (cmd.code != CommandCode::Invalid) {
-                                    client.send_command(cmd);
-                                }
-                            } else {
-                                message_log.add_message("Unknown command: " + command_text);
-                            }
-                            
-                            text_input.clear();
-                        }
-                    }
-                }
-                
-                text_input.handle_event(e);
-            }
-            
-            // Process network messages
-            std::string message;
-            while (client.pop_message(message)) {
-                message_log.add_message(message);
-            }
-            
-            // Clear screen
-            SDL_SetRenderDrawColor(renderer, 40, 44, 52, 255);
-            SDL_RenderClear(renderer);
-            
-            // Draw game area (top section)
-            SDL_SetRenderDrawColor(renderer, 30, 30, 30, 255);
-            SDL_Rect game_rect = {0, 0, WINDOW_WIDTH, WINDOW_HEIGHT - CONSOLE_HEIGHT};
-            SDL_RenderFillRect(renderer, &game_rect);
-            
-            // Draw yellow circle in the middle of game area
-            SDL_SetRenderDrawColor(renderer, 255, 255, 0, 255);
-            int center_x = WINDOW_WIDTH / 2;
-            int center_y = (WINDOW_HEIGHT - CONSOLE_HEIGHT) / 2;
-            for (int w = 0; w < 50; w++) {
-                for (int h = 0; h < 50; h++) {
-                    int dx = w - 25;
-                    int dy = h - 25;
-                    if (dx*dx + dy*dy <= 25*25) {
-                        SDL_RenderDrawPoint(renderer, center_x + dx, center_y + dy);
-                    }
-                }
-            }
-            
-            // Draw console area
-            SDL_SetRenderDrawColor(renderer, 50, 50, 50, 255);
-            SDL_Rect console_rect = {0, WINDOW_HEIGHT - CONSOLE_HEIGHT, WINDOW_WIDTH, CONSOLE_HEIGHT};
-            SDL_RenderFillRect(renderer, &console_rect);
-            
-            // Draw message log
-            SDL_Color text_color = {255, 255, 255, 255};
-            int y_pos = WINDOW_HEIGHT - CONSOLE_HEIGHT + MARGIN;
-            const auto& messages = message_log.get_messages();
-            for (int i = std::max(0, (int)messages.size() - 10); i < messages.size(); i++) {
-                render_text(renderer, font, messages[i], MARGIN, y_pos, text_color);
-                y_pos += 20;
-            }
-            
-            // Draw input box
-            SDL_SetRenderDrawColor(renderer, text_input.is_active() ? 100 : 70, 70, 70, 255);
-            SDL_Rect input_rect = {MARGIN, WINDOW_HEIGHT - INPUT_HEIGHT - MARGIN, 
-                                 WINDOW_WIDTH - 2*MARGIN, INPUT_HEIGHT};
-            SDL_RenderFillRect(renderer, &input_rect);
-            
-            // Draw input text
-            std::string input_text = "> " + text_input.get_text();
-            if (text_input.is_active() && (SDL_GetTicks() / 500) % 2 == 0) {
-                input_text += "_";
-            }
-            render_text(renderer, font, input_text, MARGIN + 5, WINDOW_HEIGHT - INPUT_HEIGHT - MARGIN + 5, text_color);
-            
-            // Draw status indicators
-            if (client.is_connected()) {
-                SDL_SetRenderDrawColor(renderer, 0, 255, 0, 255);
-            } else {
-                SDL_SetRenderDrawColor(renderer, 255, 0, 0, 255);
-            }
-            SDL_Rect status_rect = {WINDOW_WIDTH - 30, 10, 20, 20};
-            SDL_RenderFillRect(renderer, &status_rect);
-            
-            if (client.has_priority_now()) {
-                SDL_SetRenderDrawColor(renderer, 0, 0, 255, 255);
-                SDL_Rect priority_rect = {WINDOW_WIDTH - 60, 10, 20, 20};
-                SDL_RenderFillRect(renderer, &priority_rect);
-                
-                // Show priority message
-                render_text(renderer, font, "PRIORITY", WINDOW_WIDTH - 150, 12, {0, 0, 255, 255});
-            }
-            
-            // Draw help text
-            render_text(renderer, font, "Commands: upload <path>, pass, resign, quit", 
-                       MARGIN, 10, {200, 200, 200, 255});
-            
-            // Present renderer
-            SDL_RenderPresent(renderer);
-            
-            // Cap frame rate
-            SDL_Delay(16);
-        }
-        
-        // Cleanup
-        client.disconnect();
-        TTF_CloseFont(font);
-        SDL_DestroyRenderer(renderer);
+      GameClient client;
+      // Initialize SDL and SDL_ttf
+      if (SDL_Init(SDL_INIT_VIDEO) < 0) {
+        std::cerr << "SDL could not initialize! SDL_Error: " << SDL_GetError() << "\n";
+        return 1;
+      }
+      if (TTF_Init() == -1) {
+        std::cerr << "TTF could not initialize! TTF_Error: " << TTF_GetError() << "\n";
+        SDL_Quit();
+        return 1;
+      }
+      // Create window and renderer
+      SDL_Window* window = SDL_CreateWindow("Psim Client",
+                                            SDL_WINDOWPOS_CENTERED,
+                                            SDL_WINDOWPOS_CENTERED,
+                                            window_w, window_h,
+                                            SDL_WINDOW_SHOWN | SDL_WINDOW_RESIZABLE);
+
+      if (!window) {
+        std::cerr << "Window could not be created! SDL_Error: " << SDL_GetError() << "\n";
+        TTF_Quit();
+        SDL_Quit();
+        return 1;
+      }
+      SDL_Renderer* renderer = SDL_CreateRenderer(window, -1, SDL_RENDERER_ACCELERATED);
+      if (!renderer) {
+        std::cerr << "Renderer could not be created! SDL_Error: " << SDL_GetError() << "\n";
         SDL_DestroyWindow(window);
         TTF_Quit();
         SDL_Quit();
+        return 1;
+      }
+      
+      // Load font
+      TTF_Font* font = TTF_OpenFont("arial.ttf", 16);
+      if (!font) {
+        // Try fallback font
+        font = TTF_OpenFont("/usr/share/fonts/truetype/freefont/FreeMono.ttf", 16);
+        if (!font) {
+          std::cerr << "Failed to load font! TTF_Error: " << TTF_GetError() << "\n";
+          SDL_DestroyRenderer(renderer);
+          SDL_DestroyWindow(window);
+          TTF_Quit();
+          SDL_Quit();
+          return 1;
+        }
+      }
+      
+      // UI components
+      TextInput text_input;
+      MessageLog message_log;
+      DeckVisualizer deck_visualizer(renderer, font, main_area);
+      
+      // Connect to server
+      client.connect_to_server("127.0.0.1", 5000);
+      message_log.add_message("Connecting to server...");
+      
+      // Main game loop
+      bool quit = false;
+      SDL_Event e;
+
+      while (!quit) {
+        // Process events
+        while (SDL_PollEvent(&e) != 0) { // polling events from SDL
+          if (e.type == SDL_QUIT) {
+              quit = true;
+          } else if (e.type == SDL_MOUSEBUTTONDOWN) {
+              // Toggle text input focus
+            SDL_Point mouse_pos = {e.button.x, e.button.y};
+            SDL_Rect input_rect = {MARGIN, window_h- input_h - MARGIN, 
+                                 window_w - 2*MARGIN, input_h};
+            text_input.set_active(SDL_PointInRect(&mouse_pos, &input_rect));
+          } else if (e.type == SDL_KEYDOWN) {
+            if (e.key.keysym.sym == SDLK_RETURN && text_input.is_active()) {
+              // Send command
+              std::string command_text = text_input.get_text();
+              if (!command_text.empty()) {
+                message_log.add_message("You: " + command_text); 
+                // Handle special commands
+                if (command_text == "quit") {
+                    client.send_command(Command(CommandCode::Quit));
+                } else if (command_text == "resign") {
+                    client.send_command(Command(CommandCode::Resign));
+                } else if (command_text == "pass") {
+                    client.send_command(Command(CommandCode::PassPriority));
+                } else if (command_text.find("upload ") == 0) {
+                  std::string path = command_text.substr(7);
+                  Command cmd = client.create_command_from_input(CommandCode::UploadDeck, path);
+                  if (cmd.code != CommandCode::Invalid) {
+                    client.send_command(cmd);
+                  }
+                } else {
+                  message_log.add_message("Unknown command: " + command_text);
+                } 
+                text_input.clear();
+              }
+            }
+          } 
+          else if (e.type == SDL_WINDOWEVENT && (e.window.event == SDL_WINDOWEVENT_RESIZED || e.window.event == SDL_WINDOWEVENT_SIZE_CHANGED)){
+            window_w = e.window.data1;  // updated width
+            window_h = e.window.data2;  // updated height    
+            // recompute
+            console_h = window_h / 4;
+            input_h = console_h / 20;
+            // recompute main area size
+            main_area.x = 0; main_area.y=0;
+            main_area.h = window_h - console_h-input_h;
+            main_area.w = window_w;
+          }
+          text_input.handle_event(e);
+        } 
+        // Process network messages
+        std::string message;
+        while (client.pop_message(message)) {
+          message_log.add_message(message);
+        } 
+        // Clear screen
+        SDL_SetRenderDrawColor(renderer, 40, 44, 52, 255);
+        SDL_RenderClear(renderer); 
+        // Draw game area (top section)
+        SDL_SetRenderDrawColor(renderer, 30, 30, 30, 255);
+        SDL_Rect game_rect = {0, 0, window_w, window_h - console_h};
+        SDL_RenderFillRect(renderer, &game_rect); 
+        if(client.player_info.main.size() != 0){
+          deck_visualizer.renderDeck(client.player_info.main);
+        }
+        // Draw console area
+        SDL_SetRenderDrawColor(renderer, 50, 50, 50, 255);
+        SDL_Rect console_rect = {0, window_h - console_h, window_w , console_h};
+        SDL_RenderFillRect(renderer, &console_rect); 
+       // Draw message log
+        SDL_Color text_color = {255, 255, 255, 255};
+        const auto& messages = message_log.get_messages();
+        // Calculate available space for messages (above input box)
+        int available_height = console_h - input_h - 2 * MARGIN;
+        int max_lines = available_height / 20; // 20px per line
+
+        int start_index = std::max(0, (int)messages.size() - max_lines);
+        int y_pos = window_h - console_h + MARGIN;
+
+        for (int i = start_index; i < messages.size(); i++) {
+            // Don't render beyond the available space
+            if (y_pos + 20 > window_h - input_h - MARGIN) {
+                break;
+            }
+            render_text(renderer, font, messages[i], MARGIN, y_pos, text_color);
+            y_pos += 20;
+        } 
+        // Draw input box
+        SDL_SetRenderDrawColor(renderer, text_input.is_active() ? 100 : 70, 70, 70, 255);
+        SDL_Rect input_rect = {MARGIN,window_h- input_h - MARGIN, 
+                             window_w - 2*MARGIN, input_h};
+        SDL_RenderFillRect(renderer, &input_rect);
         
-    } catch (std::exception& e) {
-        std::cerr << "Client exception: " << e.what() << "\n";
-    }
-    
-    return 0;
+        // Draw input text
+        std::string input_text = "> " + text_input.get_text();
+        if (text_input.is_active() && (SDL_GetTicks() / 500) % 2 == 0) {
+            input_text += "_";
+        }
+        render_text(renderer, font, input_text, MARGIN + 5, window_h - input_h - MARGIN + 5, text_color);
+        
+        // Draw status indicators
+        if (client.is_connected()) {
+            SDL_SetRenderDrawColor(renderer, 0, 255, 0, 255);
+        } else {
+            SDL_SetRenderDrawColor(renderer, 255, 0, 0, 255);
+        }
+        SDL_Rect status_rect = {window_w - 30, 10, 20, 20};
+        SDL_RenderFillRect(renderer, &status_rect);
+        
+        if (client.has_priority_now()) {
+            SDL_SetRenderDrawColor(renderer, 0, 0, 255, 255);
+            SDL_Rect priority_rect = {window_w - 60, 10, 20, 20};
+            SDL_RenderFillRect(renderer, &priority_rect);
+            
+            // Show priority message
+            render_text(renderer, font, "PRIORITY", window_w - 150, 12, {0, 0, 255, 255});
+        }
+        
+        // Draw help text
+        render_text(renderer, font, "Commands: upload <path>, pass, resign, quit", 
+                   MARGIN, 10, {200, 200, 200, 255});
+       
+        // Present renderer
+        SDL_RenderPresent(renderer);
+        
+        // Cap frame rate
+        SDL_Delay(16);
+      }
+      
+      // Cleanup
+      client.disconnect();
+      TTF_CloseFont(font);
+      SDL_DestroyRenderer(renderer);
+      SDL_DestroyWindow(window);
+      TTF_Quit();
+      SDL_Quit();
+      
+  } catch (std::exception& e) {
+      std::cerr << "Client exception: " << e.what() << "\n";
+  }
+  
+  return 0;
 }
