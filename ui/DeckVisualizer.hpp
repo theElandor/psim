@@ -27,37 +27,150 @@ class DeckVisualizer{
 public: 
   int mouseX = 0;
   int mouseY = 0;
+  
   DeckVisualizer(SDL_Renderer* renderer, TTF_Font* font, SDL_Rect& display_area)
     : renderer(renderer), font(font), area(display_area){
       preview_width = area.w / 4;
+      update_areas();
   }
+  
+  // Update areas when window is resized
+  void update_display_area(SDL_Rect& new_area) {
+    area = new_area;
+    preview_width = area.w / 4;
+    update_areas();
+  }
+  
   RenderedCard *get_hovered_card(){
     return hoveredCard;
   }
+  
   void renderDeck(std::vector<Card> &deck){
-    // Save current viewport/clip state if needed
     if(!columns_initialized){
       initialize_columns(renderer, cols, deck);
     }
-    size_t num_cols = cols.size();
+    
+    // Save current viewport/clip state
     SDL_Rect original_viewport;
     SDL_RenderGetViewport(renderer, &original_viewport);
     SDL_RenderSetViewport(renderer, &area);
-    // code here
+    
+    // Clear the area
     SDL_SetRenderDrawColor(renderer, 0, 0, 0, 255);
     SDL_RenderClear(renderer);
 
-    // Calculate available width for columns (excluding preview area)
-    int availableWidth = area.w - preview_width - PREVIEW_MARGIN;
-    int col_width = availableWidth / (num_cols > 0 ? num_cols : 1); // Prevent division by zero
-    for (int i = 0; i < num_cols; i++) {
-      cols[i].x = i * col_width;
-      // render_column(renderer, cols[i], win_h, col_width);
-      render_cards(renderer, cols[i], area.h, col_width, mouseX, mouseY, scrollOffset);
-    } 
+    // Render deck columns
+    render_deck_columns();
+    
+    // Render preview
+    render_preview();
+    
     SDL_RenderSetViewport(renderer, &original_viewport);
   }
+
 private:
+  void update_areas() {
+    // Calculate deck area (left side, excluding preview)
+    deck_area.x = 0;
+    deck_area.y = 0;
+    deck_area.w = area.w - preview_width - PREVIEW_MARGIN;
+    deck_area.h = area.h;
+    
+    // Calculate preview area (right side)
+    preview_area.x = deck_area.w + PREVIEW_MARGIN;
+    preview_area.y = PREVIEW_MARGIN;
+    preview_area.w = preview_width - PREVIEW_MARGIN;
+    preview_area.h = area.h - 2 * PREVIEW_MARGIN;
+  }
+
+  void render_deck_columns() {
+    size_t num_cols = cols.size();
+    if (num_cols == 0) return;
+    
+    // Set viewport to deck area only
+    SDL_Rect original_viewport;
+    SDL_RenderGetViewport(renderer, &original_viewport);
+    SDL_RenderSetViewport(renderer, &deck_area);
+    
+    int col_width = deck_area.w / num_cols;
+    
+    for (int i = 0; i < num_cols; i++) {
+      cols[i].x = i * col_width;
+      render_cards(renderer, cols[i], deck_area.h, col_width, 
+                   mouseX - deck_area.x, mouseY - deck_area.y, scrollOffset);
+    }
+    
+    SDL_RenderSetViewport(renderer, &original_viewport);
+  }
+
+  void render_preview() {
+    if (!hoveredCard || !font) return;
+    
+    // Set viewport to preview area
+    SDL_Rect original_viewport;
+    SDL_RenderGetViewport(renderer, &original_viewport);
+    SDL_RenderSetViewport(renderer, &preview_area);
+    
+    // Draw preview background
+    SDL_Rect bg_rect = {0, 0, preview_area.w, preview_area.h};
+    SDL_SetRenderDrawColor(renderer, 40, 40, 40, 200);
+    SDL_RenderFillRect(renderer, &bg_rect);
+    SDL_SetRenderDrawColor(renderer, 255, 255, 255, 255);
+    SDL_RenderDrawRect(renderer, &bg_rect);
+
+    // Calculate card dimensions maintaining aspect ratio
+    float cardAspect = 66.0f / 88.0f; // Magic card aspect ratio
+    int cardWidth = preview_area.w - 2 * PREVIEW_MARGIN;
+    int cardHeight = static_cast<int>(cardWidth / cardAspect);
+
+    if (cardHeight > preview_area.h - 100) { // Leave space for text
+        cardHeight = preview_area.h - 100;
+        cardWidth = static_cast<int>(cardHeight * cardAspect);
+    }
+
+    // Position card (viewport-relative coordinates)
+    SDL_Rect cardRect;
+    cardRect.w = cardWidth;
+    cardRect.h = cardHeight;
+    cardRect.x = (preview_area.w - cardWidth) / 2;  // Centered horizontally
+    cardRect.y = PREVIEW_MARGIN;                    // Top margin
+
+    // Render the card
+    SDL_RenderCopy(renderer, hoveredCard->texture, nullptr, &cardRect);
+    
+    // Render text
+    SDL_Color textColor = {255, 255, 255, 255};
+    render_preview_text(hoveredCard->game_info.title, textColor, cardRect.y + cardRect.h + 10);
+    
+    std::string cmcText = "CMC: " + std::to_string(hoveredCard->game_info.cmc);
+    render_preview_text(cmcText, textColor, cardRect.y + cardRect.h + 35);
+    
+    SDL_RenderSetViewport(renderer, &original_viewport);
+  }
+
+  void render_preview_text(const std::string& text, SDL_Color color, int y) {
+    SDL_Surface* surface = TTF_RenderText_Solid(font, text.c_str(), color);
+    if (!surface) return;
+    
+    SDL_Texture* texture = SDL_CreateTextureFromSurface(renderer, surface);
+    if (texture) {
+        SDL_Rect rect;
+        rect.w = surface->w;
+        rect.h = surface->h;
+        rect.x = (preview_area.w - rect.w) / 2;  // Viewport-relative centering
+        rect.y = y;
+
+        // Ensure text fits
+        if (rect.w > preview_area.w - 20) {
+            rect.w = preview_area.w - 20;
+            rect.x = 10;  // Viewport-relative left margin
+        }
+
+        SDL_RenderCopy(renderer, texture, nullptr, &rect);
+        SDL_DestroyTexture(texture);
+    }
+    SDL_FreeSurface(surface);
+  }
 
   void render_column(SDL_Renderer* renderer, Column &c, int win_h, int col_width){
     /*
@@ -71,7 +184,7 @@ private:
     SDL_RenderDrawLine(renderer, c.x+col_width-PADDING/2, 0, c.x+col_width-PADDING/2, win_h);
   }
 
-    // Calculate the total height needed for all cards in a column
+  // Calculate the total height needed for all cards in a column
   float calculate_column_content_height(const Column& c, int col_width) {
     if (c.cards.empty()) return 0;   
     float card_height = ((float)(col_width) / 66) * 88;
@@ -108,94 +221,95 @@ private:
     // Clamp the scroll offset
     scrollOffset = std::max(maxScrollDown, std::min(maxScrollUp, scrollOffset));
   }
-void render_cards(SDL_Renderer* renderer, Column &c, int win_h, int col_width, int mouseX, int mouseY, float scrollOffset){
-  // renders the cards in each column with scroll support
-  SDL_SetRenderDrawColor(renderer,0,0,0,255); 
-  float offset;
-  
-  // Create clipping rectangle for this column
-  SDL_Rect clipRect;
-  clipRect.x = c.x;
-  clipRect.y = 0;
-  clipRect.w = col_width;
-  clipRect.h = win_h - BUTTON_HEIGHT - BUTTON_MARGIN;
-  SDL_RenderSetClipRect(renderer, &clipRect);
-  
-  for(int i = 0; i < c.cards.size(); i++){
-    SDL_Rect rect;
-    rect.x = c.x+PADDING/2;
-    float dyn_h;
-    rect.w = col_width-PADDING; 
-    dyn_h = ((float)rect.w/66)*88;
-    offset = dyn_h * (TITLE_PORTION);
-    rect.h = static_cast<int>(dyn_h);
-    rect.y = static_cast<int>(offset*i + scrollOffset);  // Apply scroll offset here
+
+  void render_cards(SDL_Renderer* renderer, Column &c, int win_h, int col_width, int mouseX, int mouseY, float scrollOffset){
+    // renders the cards in each column with scroll support
+    SDL_SetRenderDrawColor(renderer,0,0,0,255); 
+    float offset;
     
-    // Only render if the card is visible (within the clipped area)
-    if (rect.y + rect.h > 0 && rect.y < win_h - BUTTON_HEIGHT - BUTTON_MARGIN) {
-      // Check if mouse is hovering over this card
-      if (point_in_rect(mouseX, mouseY, rect) && 
-          mouseY < win_h - BUTTON_HEIGHT - BUTTON_MARGIN) { // Don't hover if mouse is over button area
-        hoveredCard = &c.cards[i];
-        // Draw hover highlight
+    // Create clipping rectangle for this column
+    SDL_Rect clipRect;
+    clipRect.x = c.x;
+    clipRect.y = 0;
+    clipRect.w = col_width;
+    clipRect.h = win_h - BUTTON_HEIGHT - BUTTON_MARGIN;
+    SDL_RenderSetClipRect(renderer, &clipRect);
+    
+    for(int i = 0; i < c.cards.size(); i++){
+      SDL_Rect rect;
+      rect.x = c.x+PADDING/2;
+      float dyn_h;
+      rect.w = col_width-PADDING; 
+      dyn_h = ((float)rect.w/66)*88;
+      offset = dyn_h * (TITLE_PORTION);
+      rect.h = static_cast<int>(dyn_h);
+      rect.y = static_cast<int>(offset*i + scrollOffset);  // Apply scroll offset here
+      
+      // Only render if the card is visible (within the clipped area)
+      if (rect.y + rect.h > 0 && rect.y < win_h - BUTTON_HEIGHT - BUTTON_MARGIN) {
+        // Check if mouse is hovering over this card
+        if (point_in_rect(mouseX, mouseY, rect) && 
+            mouseY < win_h - BUTTON_HEIGHT - BUTTON_MARGIN) { // Don't hover if mouse is over button area
+          hoveredCard = &c.cards[i];
+          // Draw hover highlight
+        }
+        SDL_RenderCopy(renderer, c.cards[i].texture, nullptr, &rect);
       }
-      SDL_RenderCopy(renderer, c.cards[i].texture, nullptr, &rect);
     }
-  }
-  
-  // Reset clipping
-  SDL_RenderSetClipRect(renderer, nullptr);
-}
-
-void group_cards_by_cmc(std::vector<Column>& cols, const std::vector<RenderedCard>& cards, int num_cols, float &scrollOffset) {
-  // Clear all columns
-  for (auto& col : cols) {
-    col.cards.clear();
-    col.cmc = -1;
-  }
-  
-  // Group cards by CMC
-  std::map<int, std::vector<RenderedCard>> cmcGroups;
-  for (const auto& card : cards) {
-    cmcGroups[card.game_info.cmc].push_back(card);
-  }
-  
-  // Distribute CMC groups to columns
-  int colIndex = 0;
-  for (auto& pair : cmcGroups) {
-    if (colIndex >= num_cols) break;
     
-    cols[colIndex].cards = pair.second;
-    cols[colIndex].cmc = pair.first;
-    colIndex++;
+    // Reset clipping
+    SDL_RenderSetClipRect(renderer, nullptr);
   }
-  
-  // Reset scroll when grouping changes
-  scrollOffset = 0.0f;
-}
 
-void restore_original_layout(std::vector<Column>& cols, const std::vector<RenderedCard>& cards, int num_cols, float &scrollOffset) {
+  void group_cards_by_cmc(std::vector<Column>& cols, const std::vector<RenderedCard>& cards, int num_cols, float &scrollOffset) {
     // Clear all columns
-  for (auto& col : cols) {
-    col.cards.clear();
-    col.cmc = -1;
-  }
-  
-  // Distribute cards evenly across columns (original layout)
-  int cardsPerCol = cards.size() / num_cols;
-  int extraCards = cards.size() % num_cols;
-  
-  int cardIndex = 0;
-  for (int i = 0; i < num_cols && cardIndex < cards.size(); i++) {
-    int cardsThisCol = cardsPerCol + (i < extraCards ? 1 : 0);
-    for (int j = 0; j < cardsThisCol && cardIndex < cards.size(); j++) {
-        cols[i].cards.push_back(cards[cardIndex++]);
+    for (auto& col : cols) {
+      col.cards.clear();
+      col.cmc = -1;
     }
+    
+    // Group cards by CMC
+    std::map<int, std::vector<RenderedCard>> cmcGroups;
+    for (const auto& card : cards) {
+      cmcGroups[card.game_info.cmc].push_back(card);
+    }
+    
+    // Distribute CMC groups to columns
+    int colIndex = 0;
+    for (auto& pair : cmcGroups) {
+      if (colIndex >= num_cols) break;
+      
+      cols[colIndex].cards = pair.second;
+      cols[colIndex].cmc = pair.first;
+      colIndex++;
+    }
+    
+    // Reset scroll when grouping changes
+    scrollOffset = 0.0f;
   }
-  
-  // Reset scroll when grouping changes
-  scrollOffset = 0.0f;
-}
+
+  void restore_original_layout(std::vector<Column>& cols, const std::vector<RenderedCard>& cards, int num_cols, float &scrollOffset) {
+      // Clear all columns
+    for (auto& col : cols) {
+      col.cards.clear();
+      col.cmc = -1;
+    }
+    
+    // Distribute cards evenly across columns (original layout)
+    int cardsPerCol = cards.size() / num_cols;
+    int extraCards = cards.size() % num_cols;
+    
+    int cardIndex = 0;
+    for (int i = 0; i < num_cols && cardIndex < cards.size(); i++) {
+      int cardsThisCol = cardsPerCol + (i < extraCards ? 1 : 0);
+      for (int j = 0; j < cardsThisCol && cardIndex < cards.size(); j++) {
+          cols[i].cards.push_back(cards[cardIndex++]);
+      }
+    }
+    
+    // Reset scroll when grouping changes
+    scrollOffset = 0.0f;
+  }
 
   void insert_set_in_col(SDL_Renderer* renderer, Column &col, std::vector<RenderedCard> &allCards, int size, Card *card){
     RenderedCard sample_card;
@@ -270,7 +384,9 @@ void restore_original_layout(std::vector<Column>& cols, const std::vector<Render
   TTF_Font* font;
   int preview_width;
 
-  SDL_Rect &area;
+  SDL_Rect &area;          // Total area
+  SDL_Rect deck_area;      // Area for deck columns
+  SDL_Rect preview_area;   // Area for preview
 
   float scrollOffset = 0.0f;
 

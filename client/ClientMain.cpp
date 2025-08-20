@@ -363,14 +363,7 @@ int main() {
     main_area.x = 0; main_area.y=0;
     main_area.h = window_h - console_h-input_h;
     main_area.w = window_w;
-    
-    int preview_width = main_area.w / 4;
-    preview_area.x = main_area.w - preview_width - PREVIEW_MARGIN;
-    preview_area.y = PREVIEW_MARGIN;
-    preview_area.w = preview_width;
-      // assuming button correction is applied caller side.
-    preview_area.h = main_area.h - 2*PREVIEW_MARGIN;
-
+  
     try {
       GameClient client;
       // Initialize SDL and SDL_ttf
@@ -424,7 +417,6 @@ int main() {
       TextInput text_input;
       MessageLog message_log;
       DeckVisualizer deck_visualizer(renderer, font, main_area);
-      CardPreview card_preview(renderer, font, preview_area);
       
       // Connect to server
       client.connect_to_server("127.0.0.1", 5000);
@@ -485,13 +477,7 @@ int main() {
             main_area.x = 0; main_area.y=0;
             main_area.h = window_h - console_h-input_h;
             main_area.w = window_w;
-
-            int preview_width = main_area.w / 4;
-            preview_area.x = main_area.w - preview_width - PREVIEW_MARGIN;
-            preview_area.y = PREVIEW_MARGIN;
-            preview_area.w = preview_width;
-              // assuming button correction is applied caller side.
-            preview_area.h = main_area.h - 2*PREVIEW_MARGIN;
+            deck_visualizer.update_display_area(main_area);
           }
           text_input.handle_event(e);
         } 
@@ -509,7 +495,6 @@ int main() {
         SDL_RenderFillRect(renderer, &game_rect); 
         if(client.player_info.main.size() != 0){
           deck_visualizer.renderDeck(client.player_info.main);
-          card_preview.render(deck_visualizer.get_hovered_card());
         }
         // Draw console area
         SDL_SetRenderDrawColor(renderer, 50, 50, 50, 255);
