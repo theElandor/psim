@@ -25,6 +25,7 @@
       "-pthread",
       "-I./include",
       "-I./common",
+      "-I./ui",
       "-o",
       "client_app",
       "client/ClientMain.cpp"
