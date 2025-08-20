@@ -12,6 +12,7 @@ public:
     {
       computePreviewArea();
     }
+    CardPreview(){}
 
     void computePreviewArea(){
       previewArea.x = windowWidth - previewWidth - PREVIEW_MARGIN;

@@ -7,7 +7,6 @@
 #include <vector>
 #include "RenderedCard.hpp"
 #include "Utils.hpp"
-#include "Preview.hpp"
 
 #define PADDING 20
 #define TITLE_PORTION 0.1
@@ -26,9 +25,14 @@ struct Column{
 
 class DeckVisualizer{
 public: 
+  int mouseX = 0;
+  int mouseY = 0;
   DeckVisualizer(SDL_Renderer* renderer, TTF_Font* font, SDL_Rect& display_area)
-    : renderer(renderer), area(display_area) {
+    : renderer(renderer), font(font), area(display_area){
       preview_width = area.w / 4;
+  }
+  RenderedCard *get_hovered_card(){
+    return hoveredCard;
   }
   void renderDeck(std::vector<Card> &deck){
     // Save current viewport/clip state if needed
@@ -49,7 +53,7 @@ public:
     for (int i = 0; i < num_cols; i++) {
       cols[i].x = i * col_width;
       // render_column(renderer, cols[i], win_h, col_width);
-      render_cards(renderer, cols[i], area.h, col_width, 0, 0, scrollOffset);
+      render_cards(renderer, cols[i], area.h, col_width, mouseX, mouseY, scrollOffset);
     } 
     SDL_RenderSetViewport(renderer, &original_viewport);
   }
@@ -264,12 +268,13 @@ void restore_original_layout(std::vector<Column>& cols, const std::vector<Render
 
   SDL_Renderer* renderer;
   TTF_Font* font;
+  int preview_width;
+
   SDL_Rect &area;
+
   float scrollOffset = 0.0f;
-  const float SCROLL_SPEED = 30.0f;
-  size_t preview_width;
+
   std::vector<Column> cols;
-  bool groupedByCMC = false;
   std::vector<RenderedCard> allCards; // Store all cards for regrouping
   RenderedCard* hoveredCard = nullptr; // Pointer to currently hovered card
   bool columns_initialized = false;
