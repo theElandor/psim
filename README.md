@@ -4,10 +4,18 @@
 + libcurl4-openssl-dev    
 + libsdl2-ttf-dev
 
-# Deck visualizer
-For now, the only sort of working part is the deck visualizer.
-To compile the demo, use:
+# Quick load deck demo
+Still working on clients loading decks.
+Compile with
 ```
-g++ main.cpp -I ../common -lSDL2 -lSDL2_image -lSDL2_ttf -lcurl
+make clean all
 ```
-then run the executable.
+then run a server with
+```
+./server_app
+```
+and two clients on different terminals with
+```
+./client_app
+```
+then type "upload <path>" on the client with priority to see your deck visualized.
