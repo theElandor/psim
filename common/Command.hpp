@@ -8,6 +8,7 @@ enum class CommandCode {
     UploadDeck, // Command to upload deck
     Resign,
     Quit,
+    Invalid,
     Unknown
 };
 
@@ -19,6 +20,7 @@ inline std::string commandCodeToString(CommandCode code) {
         case CommandCode::UploadDeck:  return "Upload Deck";
         case CommandCode::Resign:      return "Resign"; 
         case CommandCode::Quit:        return "Quit"; 
+        case CommandCode::Invalid:    return "Invalid"; 
         default:                       return "Unknown";
     }
 }
@@ -28,6 +30,7 @@ inline CommandCode commandCodeFromString(const std::string& str) {
     if (str == "Pass Priority") return CommandCode::PassPriority;
     if (str == "Upload Deck")   return CommandCode::UploadDeck;
     if (str == "Resign")        return CommandCode::Resign;
+    if (str == "Invalid")        return CommandCode::Invalid;
     if (str == "Quit")          return CommandCode::Quit;
     return CommandCode::Unknown;
 }
