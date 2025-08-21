@@ -3,8 +3,14 @@
 #include <SDL2/SDL_image.h>
 #include <SDL2/SDL_ttf.h>
 #include "Scryfall.hpp"
+#include "Preview.hpp"
 
 #include <vector>
+#include <thread>
+#include <atomic>
+#include <mutex>
+#include <future>
+#include <queue>
 #include "RenderedCard.hpp"
 #include "Utils.hpp"
 
@@ -23,15 +29,44 @@ struct Column{
   int cmc; // CMC value for this column when grouped
 };
 
+struct CardLoadTask {
+  Card card_info;
+  int copies;
+  size_t column_index;
+  size_t task_id;
+};
+struct LoadedCard {
+    std::string title;
+    int cmc;
+    std::vector<unsigned char> image_data; // Raw image data
+    int copies;
+    size_t column_index;
+    size_t task_id;
+};
+enum class LoadingState {
+  IDLE,
+  LOADING,
+  COMPLETED,
+  ERROR
+};
+
 class DeckVisualizer{
 public: 
   int mouseX = 0;
   int mouseY = 0;
   
   DeckVisualizer(SDL_Renderer* renderer, TTF_Font* font, SDL_Rect& display_area)
-    : renderer(renderer), font(font), area(display_area){
+    : renderer(renderer), font(font), area(display_area), 
+      loading_state(LoadingState::IDLE), total_tasks(0), completed_tasks(0) {
       preview_width = area.w / 4;
       update_areas();
+      preview = new Preview(renderer, font, preview_area);
+  }
+  
+  ~DeckVisualizer() {
+    // Stop background loading
+    stop_loading();
+    delete preview;
   }
   
   // Update areas when window is resized
@@ -39,16 +74,31 @@ public:
     area = new_area;
     preview_width = area.w / 4;
     update_areas();
+    if (preview) {
+      preview->update_area(preview_area);
+    }
   }
   
   RenderedCard *get_hovered_card(){
     return hoveredCard;
   }
   
+  // Handle mouse wheel scrolling
+  void handle_scroll(int scroll_y) {
+    float scroll_speed = 30.0f;
+    scrollOffset += scroll_y * scroll_speed;
+    
+    // Clamp scroll offset
+    clamp_scroll_offset();
+  }
+  
   void renderDeck(std::vector<Card> &deck){
-    if(!columns_initialized){
-      initialize_columns(renderer, cols, deck);
+    if(!columns_initialized && loading_state == LoadingState::IDLE){
+      initialize_columns_async(deck);
     }
+    
+    // Process any completed card loads
+    process_completed_loads();
     
     // Save current viewport/clip state
     SDL_Rect original_viewport;
@@ -59,11 +109,18 @@ public:
     SDL_SetRenderDrawColor(renderer, 0, 0, 0, 255);
     SDL_RenderClear(renderer);
 
-    // Render deck columns
-    render_deck_columns();
-    
-    // Render preview
-    render_preview();
+    // Show loading popup if still loading
+    if (loading_state == LoadingState::LOADING) {
+      render_loading_popup();
+    } else if (loading_state == LoadingState::COMPLETED || loading_state == LoadingState::ERROR) {
+      // Render deck columns
+      render_deck_columns();
+      
+      // Render preview
+      if (preview && hoveredCard) {
+        preview->render(hoveredCard);
+      }
+    }
     
     SDL_RenderSetViewport(renderer, &original_viewport);
   }
@@ -83,6 +140,83 @@ private:
     preview_area.h = area.h - 2 * PREVIEW_MARGIN;
   }
 
+  void render_loading_popup() {
+    // Calculate popup dimensions
+    int popup_w = 300;
+    int popup_h = 150;
+    int popup_x = (area.w - popup_w) / 2;
+    int popup_y = (area.h - popup_h) / 2;
+    
+    // Draw semi-transparent overlay
+    SDL_SetRenderDrawBlendMode(renderer, SDL_BLENDMODE_BLEND);
+    SDL_SetRenderDrawColor(renderer, 0, 0, 0, 128);
+    SDL_Rect overlay = {0, 0, area.w, area.h};
+    SDL_RenderFillRect(renderer, &overlay);
+    
+    // Draw popup background
+    SDL_SetRenderDrawColor(renderer, 60, 60, 60, 255);
+    SDL_Rect popup_bg = {popup_x, popup_y, popup_w, popup_h};
+    SDL_RenderFillRect(renderer, &popup_bg);
+    
+    // Draw popup border
+    SDL_SetRenderDrawColor(renderer, 200, 200, 200, 255);
+    SDL_RenderDrawRect(renderer, &popup_bg);
+    
+    // Draw loading text
+    if (font) {
+      SDL_Color text_color = {255, 255, 255, 255};
+      std::string loading_text = "Loading cards...";
+      render_popup_text(loading_text, popup_x + popup_w/2, popup_y + 40, text_color, true);
+      
+      // Draw progress
+      if (total_tasks > 0) {
+        float progress = (float)completed_tasks / total_tasks;
+        std::string progress_text = std::to_string(completed_tasks) + "/" + std::to_string(total_tasks);
+        render_popup_text(progress_text, popup_x + popup_w/2, popup_y + 70, text_color, true);
+        
+        // Draw progress bar
+        int bar_w = popup_w - 40;
+        int bar_h = 20;
+        int bar_x = popup_x + 20;
+        int bar_y = popup_y + 90;
+        
+        // Progress bar background
+        SDL_SetRenderDrawColor(renderer, 40, 40, 40, 255);
+        SDL_Rect bar_bg = {bar_x, bar_y, bar_w, bar_h};
+        SDL_RenderFillRect(renderer, &bar_bg);
+        
+        // Progress bar fill
+        SDL_SetRenderDrawColor(renderer, 0, 150, 0, 255);
+        SDL_Rect bar_fill = {bar_x, bar_y, (int)(bar_w * progress), bar_h};
+        SDL_RenderFillRect(renderer, &bar_fill);
+        
+        // Progress bar border
+        SDL_SetRenderDrawColor(renderer, 200, 200, 200, 255);
+        SDL_RenderDrawRect(renderer, &bar_bg);
+      }
+    }
+    
+    SDL_SetRenderDrawBlendMode(renderer, SDL_BLENDMODE_NONE);
+  }
+  
+  void render_popup_text(const std::string& text, int center_x, int y, SDL_Color color, bool center = false) {
+    SDL_Surface* surface = TTF_RenderText_Solid(font, text.c_str(), color);
+    if (!surface) return;
+    
+    SDL_Texture* texture = SDL_CreateTextureFromSurface(renderer, surface);
+    if (texture) {
+      SDL_Rect rect;
+      rect.w = surface->w;
+      rect.h = surface->h;
+      rect.x = center ? center_x - rect.w/2 : center_x;
+      rect.y = y;
+
+      SDL_RenderCopy(renderer, texture, nullptr, &rect);
+      SDL_DestroyTexture(texture);
+    }
+    SDL_FreeSurface(surface);
+  }
+
   void render_deck_columns() {
     size_t num_cols = cols.size();
     if (num_cols == 0) return;
@@ -94,6 +228,9 @@ private:
     
     int col_width = deck_area.w / num_cols;
     
+    // Reset hovered card at start of render
+    hoveredCard = nullptr;
+    
     for (int i = 0; i < num_cols; i++) {
       cols[i].x = i * col_width;
       render_cards(renderer, cols[i], deck_area.h, col_width, 
@@ -101,87 +238,6 @@ private:
     }
     
     SDL_RenderSetViewport(renderer, &original_viewport);
-  }
-
-  void render_preview() {
-    if (!hoveredCard || !font) return;
-    
-    // Set viewport to preview area
-    SDL_Rect original_viewport;
-    SDL_RenderGetViewport(renderer, &original_viewport);
-    SDL_RenderSetViewport(renderer, &preview_area);
-    
-    // Draw preview background
-    SDL_Rect bg_rect = {0, 0, preview_area.w, preview_area.h};
-    SDL_SetRenderDrawColor(renderer, 40, 40, 40, 200);
-    SDL_RenderFillRect(renderer, &bg_rect);
-    SDL_SetRenderDrawColor(renderer, 255, 255, 255, 255);
-    SDL_RenderDrawRect(renderer, &bg_rect);
-
-    // Calculate card dimensions maintaining aspect ratio
-    float cardAspect = 66.0f / 88.0f; // Magic card aspect ratio
-    int cardWidth = preview_area.w - 2 * PREVIEW_MARGIN;
-    int cardHeight = static_cast<int>(cardWidth / cardAspect);
-
-    if (cardHeight > preview_area.h - 100) { // Leave space for text
-        cardHeight = preview_area.h - 100;
-        cardWidth = static_cast<int>(cardHeight * cardAspect);
-    }
-
-    // Position card (viewport-relative coordinates)
-    SDL_Rect cardRect;
-    cardRect.w = cardWidth;
-    cardRect.h = cardHeight;
-    cardRect.x = (preview_area.w - cardWidth) / 2;  // Centered horizontally
-    cardRect.y = PREVIEW_MARGIN;                    // Top margin
-
-    // Render the card
-    SDL_RenderCopy(renderer, hoveredCard->texture, nullptr, &cardRect);
-    
-    // Render text
-    SDL_Color textColor = {255, 255, 255, 255};
-    render_preview_text(hoveredCard->game_info.title, textColor, cardRect.y + cardRect.h + 10);
-    
-    std::string cmcText = "CMC: " + std::to_string(hoveredCard->game_info.cmc);
-    render_preview_text(cmcText, textColor, cardRect.y + cardRect.h + 35);
-    
-    SDL_RenderSetViewport(renderer, &original_viewport);
-  }
-
-  void render_preview_text(const std::string& text, SDL_Color color, int y) {
-    SDL_Surface* surface = TTF_RenderText_Solid(font, text.c_str(), color);
-    if (!surface) return;
-    
-    SDL_Texture* texture = SDL_CreateTextureFromSurface(renderer, surface);
-    if (texture) {
-        SDL_Rect rect;
-        rect.w = surface->w;
-        rect.h = surface->h;
-        rect.x = (preview_area.w - rect.w) / 2;  // Viewport-relative centering
-        rect.y = y;
-
-        // Ensure text fits
-        if (rect.w > preview_area.w - 20) {
-            rect.w = preview_area.w - 20;
-            rect.x = 10;  // Viewport-relative left margin
-        }
-
-        SDL_RenderCopy(renderer, texture, nullptr, &rect);
-        SDL_DestroyTexture(texture);
-    }
-    SDL_FreeSurface(surface);
-  }
-
-  void render_column(SDL_Renderer* renderer, Column &c, int win_h, int col_width){
-    /*
-     * Renders the borders of the columns, which are the card containers.
-     * Made for debugging purposes.
-     */
-    SDL_SetRenderDrawColor(renderer,
-                           c.borderColor.r, c.borderColor.g, 
-                           c.borderColor.b, 255);
-    SDL_RenderDrawLine(renderer, c.x+PADDING/2, 0, c.x+PADDING/2, win_h);
-    SDL_RenderDrawLine(renderer, c.x+col_width-PADDING/2, 0, c.x+col_width-PADDING/2, win_h);
   }
 
   // Calculate the total height needed for all cards in a column
@@ -193,7 +249,7 @@ private:
     return (c.cards.size() - 1) * card_offset + card_height;
   }
 
-  float get_max_content_height(const std::vector<Column>& cols, int col_width) {
+  float get_max_content_height(int col_width) {
     float maxHeight = 0;
     for (const auto& col : cols) {
       float height = calculate_column_content_height(col, col_width);
@@ -202,22 +258,26 @@ private:
     return maxHeight;
   }
 
-  void clamp_scroll_offset(float &scrollOffset, int win_w, int win_h, int preview_width, 
-                          const std::vector<Column>& cols, size_t num_cols) {    
-
-    int availableWidth = win_w - preview_width - PREVIEW_MARGIN;
-    int col_width = availableWidth / (num_cols > 0 ? num_cols : 1);
-    float maxContentHeight = get_max_content_height(cols, col_width);
-    float viewportHeight = win_h - BUTTON_HEIGHT - BUTTON_MARGIN;
+  void clamp_scroll_offset() {    
+    if (cols.empty()) {
+      scrollOffset = 0.0f;
+      return;
+    }
+    
+    int col_width = deck_area.w / cols.size();
+    float maxContentHeight = get_max_content_height(col_width);
+    float viewportHeight = deck_area.h - BUTTON_HEIGHT - BUTTON_MARGIN;
     
     if (maxContentHeight <= viewportHeight) {
         // Content fits entirely in viewport - no scrolling needed
         scrollOffset = 0.0f;
         return;
     } 
+    
     // Calculate scroll limits
     float maxScrollUp = 0.0f;  // Can't scroll above the top of first card
     float maxScrollDown = viewportHeight - maxContentHeight;  // Can scroll until last card is visible
+    
     // Clamp the scroll offset
     scrollOffset = std::max(maxScrollDown, std::min(maxScrollUp, scrollOffset));
   }
@@ -247,13 +307,13 @@ private:
       
       // Only render if the card is visible (within the clipped area)
       if (rect.y + rect.h > 0 && rect.y < win_h - BUTTON_HEIGHT - BUTTON_MARGIN) {
-        // Check if mouse is hovering over this card
+        SDL_RenderCopy(renderer, c.cards[i].texture, nullptr, &rect);
+        
+        // Check if mouse is hovering over this card (after rendering)
         if (point_in_rect(mouseX, mouseY, rect) && 
             mouseY < win_h - BUTTON_HEIGHT - BUTTON_MARGIN) { // Don't hover if mouse is over button area
           hoveredCard = &c.cards[i];
-          // Draw hover highlight
         }
-        SDL_RenderCopy(renderer, c.cards[i].texture, nullptr, &rect);
       }
     }
     
@@ -261,128 +321,171 @@ private:
     SDL_RenderSetClipRect(renderer, nullptr);
   }
 
-  void group_cards_by_cmc(std::vector<Column>& cols, const std::vector<RenderedCard>& cards, int num_cols, float &scrollOffset) {
-    // Clear all columns
-    for (auto& col : cols) {
-      col.cards.clear();
-      col.cmc = -1;
+  void initialize_columns_async(std::vector<Card>& deck) {
+    loading_state = LoadingState::LOADING;
+    total_tasks = 0;
+    completed_tasks = 0;
+    task_counter = 0;
+    
+    // Clear previous data
+    cols.clear();
+    allCards.clear();
+    
+    // Group cards by name and count
+    std::map<std::string, int> cardCounts;
+    for (const auto& card : deck) {
+      cardCounts[card.title]++;
     }
     
-    // Group cards by CMC
-    std::map<int, std::vector<RenderedCard>> cmcGroups;
-    for (const auto& card : cards) {
-      cmcGroups[card.game_info.cmc].push_back(card);
-    }
-    
-    // Distribute CMC groups to columns
-    int colIndex = 0;
-    for (auto& pair : cmcGroups) {
-      if (colIndex >= num_cols) break;
-      
-      cols[colIndex].cards = pair.second;
-      cols[colIndex].cmc = pair.first;
-      colIndex++;
-    }
-    
-    // Reset scroll when grouping changes
-    scrollOffset = 0.0f;
-  }
-
-  void restore_original_layout(std::vector<Column>& cols, const std::vector<RenderedCard>& cards, int num_cols, float &scrollOffset) {
-      // Clear all columns
-    for (auto& col : cols) {
-      col.cards.clear();
-      col.cmc = -1;
-    }
-    
-    // Distribute cards evenly across columns (original layout)
-    int cardsPerCol = cards.size() / num_cols;
-    int extraCards = cards.size() % num_cols;
-    
-    int cardIndex = 0;
-    for (int i = 0; i < num_cols && cardIndex < cards.size(); i++) {
-      int cardsThisCol = cardsPerCol + (i < extraCards ? 1 : 0);
-      for (int j = 0; j < cardsThisCol && cardIndex < cards.size(); j++) {
-          cols[i].cards.push_back(cards[cardIndex++]);
-      }
-    }
-    
-    // Reset scroll when grouping changes
-    scrollOffset = 0.0f;
-  }
-
-  void insert_set_in_col(SDL_Renderer* renderer, Column &col, std::vector<RenderedCard> &allCards, int size, Card *card){
-    RenderedCard sample_card;
-    sample_card.game_info = *card; // Copy card data, not pointer assignment
-    ScryfallAPI api;
-    std::cout<<"Getting card information..."<<std::endl;
-    std::string card_info = api.getCardByName(sample_card.game_info.title); // Fixed: use card->title instead of undefined card_name
-    std::string url = api.getCardImageURL(card_info);
-    sample_card.game_info.cmc = api.getCardCmc(card_info);
-    // create texture
-    auto imageData = api.downloadImageCached(url);
-    SDL_Texture *texture = loadTextureFromMemory(renderer,imageData); 
-    sample_card.texture = texture; // Fixed: use sample_card instead of card
-    sample_card.w = 20; 
-    sample_card.h = 30;
-    for(int i = 0; i < size; i++){
-      col.cards.push_back(sample_card);
-      allCards.push_back(sample_card);
-    }
-  }
-
-  void initialize_columns(SDL_Renderer* renderer, std::vector<Column> &cols, std::vector<Card> &deck){
-    /*
-    * This function initially sorts the cards.
-    * Each column can contain up to 16 cards.
-    * Sets are not split onto multiple columns.
-    */
-    int next_size = 1; // Fixed: initialize to 1, not 0
+    // Create columns and tasks
     Column col;
-    col.x = 0; col.y = 0;
-    col.cmc = -1;
-    std::string next_set_name = deck[0].title; // Fixed: initialize with first card's title
+    col.x = 0; col.y = 0; col.cmc = -1;
+    size_t current_column = 0;
     
-    for(int i = 0; i < deck.size(); i++){
-      if(i == 0) {
-        // First card, initialize counters
-        next_size = 1;
-        next_set_name = deck[i].title;
-      }
-      else if(deck[i].title == next_set_name){ // Same card as previous
-        next_size++;
-      }
-      else{ // New card encountered
-        if(col.cards.size() + next_size <= 16){
-          // Insert these cards in current column
-          insert_set_in_col(renderer, col, allCards, next_size, &deck[i-1]); // Use previous card
-          next_size = 1;
-          next_set_name = deck[i].title;
+    for (const auto& pair : cardCounts) {
+      if (col.cards.size() + pair.second > 16) {
+        // Start new column
+        if (!col.cards.empty()) {
+          cols.push_back(col);
+          current_column++;
         }
-        else{ // Start new column
-          cols.push_back(col); 
-          // Initialize new column
-          col.cards.clear();
-          col.x = 0; col.y = 0;
-          col.cmc = -1;
-          insert_set_in_col(renderer, col, allCards, next_size, &deck[i-1]);
-          next_size = 1;
-          next_set_name = deck[i].title;
-        }
+        col.cards.clear();
+        col.x = 0; col.y = 0; col.cmc = -1;
       }
-      columns_initialized = true;
+      
+      // Create task for this card
+      CardLoadTask task;
+      task.card_info.title = pair.first;
+      task.copies = pair.second;
+      task.column_index = current_column;
+      task.task_id = task_counter++;
+      
+      // Add placeholder cards to column
+      for (int i = 0; i < pair.second; i++) {
+          RenderedCard placeholder;
+          placeholder.game_info.title = pair.first;
+          placeholder.game_info.cmc = -1; // Mark as not loaded
+          placeholder.texture = nullptr;
+          placeholder.w = 0;
+          placeholder.h = 0;
+          col.cards.push_back(placeholder);
+      }
+
+      {
+        std::lock_guard<std::mutex> lock(task_mutex);
+        pending_tasks.push(task);
+        total_tasks++;
+      }
     }
     
-    // Don't forget to add the last batch of cards
-    if (next_size > 0 && !deck.empty()) {
-      insert_set_in_col(renderer, col, allCards, next_size, &deck.back());
+    // Add the last column
+    if (!col.cards.empty()) {
       cols.push_back(col);
+    }
+    
+    // Start background thread
+    stop_loading();  // Stop any existing thread
+    loading_thread = std::thread(&DeckVisualizer::load_cards_background, this);
+  }
+  
+void load_cards_background() {
+    ScryfallAPI api;
+    
+    while (true) {
+        CardLoadTask task;
+        bool has_task = false;
+        
+        {
+            std::lock_guard<std::mutex> lock(task_mutex);
+            if (!pending_tasks.empty()) {
+                task = pending_tasks.front();
+                pending_tasks.pop();
+                has_task = true;
+            }
+        }
+        
+        if (!has_task) {
+            loading_state = LoadingState::COMPLETED;
+            columns_initialized = true;
+            break;
+        }
+        
+        try {
+            // Load card data
+            std::string card_info = api.getCardByName(task.card_info.title);
+            std::string url = api.getCardImageURL(card_info);
+            int cmc = api.getCardCmc(card_info);
+            
+            // Download image data (not texture)
+            auto imageData = api.downloadImageCached(url);
+            
+            // Create loaded card with image data
+            LoadedCard loaded_card;
+            loaded_card.title = task.card_info.title;
+            loaded_card.cmc = cmc;
+            loaded_card.image_data = imageData; // Store raw data
+            loaded_card.copies = task.copies;
+            loaded_card.column_index = task.column_index;
+            loaded_card.task_id = task.task_id;
+            
+            {
+                std::lock_guard<std::mutex> lock(completed_mutex);
+                completed_loads.push(loaded_card);
+            }
+            
+            completed_tasks++;
+            
+        } catch (const std::exception& e) {
+            std::cerr << "Error loading card " << task.card_info.title << ": " << e.what() << std::endl;
+            completed_tasks++;
+        }
+    }
+}
+  
+void process_completed_loads() {
+    std::lock_guard<std::mutex> lock(completed_mutex);
+    
+    while (!completed_loads.empty()) {
+        LoadedCard loaded = completed_loads.front();
+        completed_loads.pop();
+        
+        // Create texture in main thread
+        SDL_Texture* texture = loadTextureFromMemory(renderer, loaded.image_data);
+        
+        if (texture && loaded.column_index < cols.size()) {
+            // Update cards with matching name
+            int updated = 0;
+            for (auto& card : cols[loaded.column_index].cards) {
+                if (card.game_info.title == loaded.title && updated < loaded.copies) {
+                    card.game_info.cmc = loaded.cmc;
+                    card.texture = texture;
+                    card.w = 20;  // Set appropriate dimensions
+                    card.h = 30;
+                    allCards.push_back(card);
+                    updated++;
+                }
+            }
+        }
+    }
+}
+
+  void stop_loading() {
+    if (loading_thread.joinable()) {
+      // Clear remaining tasks to signal thread to stop
+      {
+        std::lock_guard<std::mutex> lock(task_mutex);
+        while (!pending_tasks.empty()) {
+          pending_tasks.pop();
+        }
+      }
+      loading_thread.join();
     }
   }
 
   SDL_Renderer* renderer;
   TTF_Font* font;
   int preview_width;
+  Preview* preview;
 
   SDL_Rect &area;          // Total area
   SDL_Rect deck_area;      // Area for deck columns
@@ -394,4 +497,15 @@ private:
   std::vector<RenderedCard> allCards; // Store all cards for regrouping
   RenderedCard* hoveredCard = nullptr; // Pointer to currently hovered card
   bool columns_initialized = false;
+  
+  // Threading for card loading
+  std::atomic<LoadingState> loading_state;
+  std::thread loading_thread;
+  std::queue<CardLoadTask> pending_tasks;
+  std::queue<LoadedCard> completed_loads;
+  std::mutex task_mutex;
+  std::mutex completed_mutex;
+  std::atomic<size_t> total_tasks;
+  std::atomic<size_t> completed_tasks;
+  size_t task_counter;
 };

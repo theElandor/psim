@@ -454,9 +454,3 @@ public:
         std::cout << "  Total size: " << (getCacheSize() / 1024.0 / 1024.0) << " MB" << std::endl;
     }
 };
-
-void printSeparator(const std::string& title) {
-    std::cout << "\n" << std::string(50, '=') << std::endl;
-    std::cout << title << std::endl;
-    std::cout << std::string(50, '=') << std::endl;
-}

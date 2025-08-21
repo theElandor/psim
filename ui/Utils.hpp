@@ -1,9 +1,10 @@
 #pragma once
+#include <string>
+#include <vector>
+#include <iostream>
+#include <SDL2/SDL_ttf.h>
 #include <SDL2/SDL.h>
-/*
-* Header with generic SDL2 utils.
-  No application specific classes needed.
-*/
+
 SDL_Texture* loadTextureFromMemory(SDL_Renderer* renderer, const std::vector<unsigned char>& imageData) {
   /*
    * AI generated. Returns a texture object given a buffer of data.
@@ -25,4 +26,16 @@ SDL_Texture* loadTextureFromMemory(SDL_Renderer* renderer, const std::vector<uns
 
 bool point_in_rect(int x, int y, const SDL_Rect& rect) {
   return x >= rect.x && x < rect.x + rect.w && y >= rect.y && y < rect.y + rect.h;
+}
+
+void render_text(SDL_Renderer* renderer, TTF_Font* font, const std::string& text, 
+                 int x, int y, SDL_Color color) {
+  SDL_Surface* surface = TTF_RenderText_Blended(font, text.c_str(), color);
+  if (surface) {
+      SDL_Texture* texture = SDL_CreateTextureFromSurface(renderer, surface);
+      SDL_Rect rect = {x, y, surface->w, surface->h};
+      SDL_RenderCopy(renderer, texture, nullptr, &rect);
+      SDL_FreeSurface(surface);
+      SDL_DestroyTexture(texture);
+  }
 }
