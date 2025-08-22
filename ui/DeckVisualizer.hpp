@@ -9,7 +9,6 @@
 #include <thread>
 #include <atomic>
 #include <mutex>
-#include <future>
 #include <queue>
 #include "RenderedCard.hpp"
 #include "Utils.hpp"
@@ -68,7 +67,17 @@ public:
     stop_loading();
     delete preview;
   }
-  
+
+  void reset_for_new_deck() {
+    stop_loading();
+    columns_initialized = false;
+    cols.clear();
+    allCards.clear();
+    hoveredCard = nullptr;
+    scrollOffset = 0.0f;
+    loading_state = LoadingState::IDLE;
+  }
+
   // Update areas when window is resized
   void update_display_area(SDL_Rect& new_area) {
     area = new_area;
@@ -231,7 +240,7 @@ private:
     // Reset hovered card at start of render
     hoveredCard = nullptr;
     
-    for (int i = 0; i < num_cols; i++) {
+    for (size_t i = 0; i < num_cols; i++) {
       cols[i].x = i * col_width;
       render_cards(renderer, cols[i], deck_area.h, col_width, 
                    mouseX - deck_area.x, mouseY - deck_area.y, scrollOffset);
@@ -295,7 +304,7 @@ private:
     clipRect.h = win_h - BUTTON_HEIGHT - BUTTON_MARGIN;
     SDL_RenderSetClipRect(renderer, &clipRect);
     
-    for(int i = 0; i < c.cards.size(); i++){
+    for(size_t i = 0; i < c.cards.size(); i++){
       SDL_Rect rect;
       rect.x = c.x+PADDING/2;
       float dyn_h;
@@ -362,15 +371,14 @@ private:
       
       // Add placeholder cards to column
       for (int i = 0; i < pair.second; i++) {
-          RenderedCard placeholder;
-          placeholder.game_info.title = pair.first;
-          placeholder.game_info.cmc = -1; // Mark as not loaded
-          placeholder.texture = nullptr;
-          placeholder.w = 0;
-          placeholder.h = 0;
-          col.cards.push_back(placeholder);
+        RenderedCard placeholder;
+        placeholder.game_info.title = pair.first;
+        placeholder.game_info.cmc = -1; // Mark as not loaded
+        placeholder.texture = nullptr;
+        placeholder.w = 0;
+        placeholder.h = 0;
+        col.cards.push_back(placeholder);
       }
-
       {
         std::lock_guard<std::mutex> lock(task_mutex);
         pending_tasks.push(task);
@@ -389,84 +397,83 @@ private:
   }
   
 void load_cards_background() {
-    ScryfallAPI api;
+  ScryfallAPI api; 
+  while (true) {
+    CardLoadTask task;
+    bool has_task = false;
     
-    while (true) {
-        CardLoadTask task;
-        bool has_task = false;
-        
-        {
-            std::lock_guard<std::mutex> lock(task_mutex);
-            if (!pending_tasks.empty()) {
-                task = pending_tasks.front();
-                pending_tasks.pop();
-                has_task = true;
-            }
-        }
-        
-        if (!has_task) {
-            loading_state = LoadingState::COMPLETED;
-            columns_initialized = true;
-            break;
-        }
-        
-        try {
-            // Load card data
-            std::string card_info = api.getCardByName(task.card_info.title);
-            std::string url = api.getCardImageURL(card_info);
-            int cmc = api.getCardCmc(card_info);
-            
-            // Download image data (not texture)
-            auto imageData = api.downloadImageCached(url);
-            
-            // Create loaded card with image data
-            LoadedCard loaded_card;
-            loaded_card.title = task.card_info.title;
-            loaded_card.cmc = cmc;
-            loaded_card.image_data = imageData; // Store raw data
-            loaded_card.copies = task.copies;
-            loaded_card.column_index = task.column_index;
-            loaded_card.task_id = task.task_id;
-            
-            {
-                std::lock_guard<std::mutex> lock(completed_mutex);
-                completed_loads.push(loaded_card);
-            }
-            
-            completed_tasks++;
-            
-        } catch (const std::exception& e) {
-            std::cerr << "Error loading card " << task.card_info.title << ": " << e.what() << std::endl;
-            completed_tasks++;
-        }
+    {
+      std::lock_guard<std::mutex> lock(task_mutex);
+      if (!pending_tasks.empty()) {
+          task = pending_tasks.front();
+          pending_tasks.pop();
+          has_task = true;
+      }
     }
+    
+    if (!has_task) {
+      loading_state = LoadingState::COMPLETED;
+      columns_initialized = true;
+      break;
+    }
+    
+    try {
+      // Load card data
+      std::string card_info = api.getCardByName(task.card_info.title);
+      std::string url = api.getCardImageURL(card_info);
+      int cmc = api.getCardCmc(card_info);
+      
+      // Download image data (not texture)
+      auto imageData = api.downloadImageCached(url);
+      
+      // Create loaded card with image data
+      LoadedCard loaded_card;
+      loaded_card.title = task.card_info.title;
+      loaded_card.cmc = cmc;
+      loaded_card.image_data = imageData; // Store raw data
+      loaded_card.copies = task.copies;
+      loaded_card.column_index = task.column_index;
+      loaded_card.task_id = task.task_id;
+      
+      {
+          std::lock_guard<std::mutex> lock(completed_mutex);
+          completed_loads.push(loaded_card);
+      }
+      
+      completed_tasks++;
+        
+    } catch (const std::exception& e) {
+        std::cerr << "Error loading card " << task.card_info.title << ": " << e.what() << std::endl;
+        completed_tasks++;
+    }
+  }
 }
   
 void process_completed_loads() {
-    std::lock_guard<std::mutex> lock(completed_mutex);
+  std::lock_guard<std::mutex> lock(completed_mutex);
+  
+  while (!completed_loads.empty()) {
+    LoadedCard loaded = completed_loads.front();
+    completed_loads.pop();
     
-    while (!completed_loads.empty()) {
-        LoadedCard loaded = completed_loads.front();
-        completed_loads.pop();
-        
-        // Create texture in main thread
-        SDL_Texture* texture = loadTextureFromMemory(renderer, loaded.image_data);
-        
-        if (texture && loaded.column_index < cols.size()) {
-            // Update cards with matching name
-            int updated = 0;
-            for (auto& card : cols[loaded.column_index].cards) {
-                if (card.game_info.title == loaded.title && updated < loaded.copies) {
-                    card.game_info.cmc = loaded.cmc;
-                    card.texture = texture;
-                    card.w = 20;  // Set appropriate dimensions
-                    card.h = 30;
-                    allCards.push_back(card);
-                    updated++;
-                }
-            }
+    // Create texture in main thread
+    SDL_Texture* texture = loadTextureFromMemory(renderer, loaded.image_data);
+    
+    if (texture && loaded.column_index < cols.size()) {
+        // Update cards with matching name
+      int updated = 0;
+      for (auto& card : cols[loaded.column_index].cards) {
+        if (card.game_info.title == loaded.title && updated < loaded.copies) {
+          card.game_info.cmc = loaded.cmc;
+          card.texture = texture;
+          card.w = 20;  // Set appropriate dimensions
+          card.h = 30;
+          allCards.push_back(card);
+          updated++;
         }
+      }
     }
+  }
 }
 
   void stop_loading() {

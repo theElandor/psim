@@ -32,6 +32,7 @@ private:
   tcp::socket socket;
   PublicInfo info;
   std::atomic<bool> connected;
+
   std::vector<char> read_buffer;
   uint32_t expected_message_length;
   std::vector<CommandCode> available_commands;
@@ -44,12 +45,14 @@ private:
   // Message queue for UI thread
   std::queue<std::string> message_queue;
   std::mutex queue_mutex;
-    
+
+  std::atomic<bool> deck_parsed; 
+  
 public:
   PlayerInfo player_info;
   GameClient() 
   : socket(io_context), connected(false), 
-    expected_message_length(0){
+    expected_message_length(0), deck_parsed(false){
     read_buffer.resize(65536); // 64KB buffer
   }
   
@@ -77,7 +80,13 @@ public:
       connected = false;
     }
   }
-
+  bool check_clear_deck_parsed(){
+    bool was_set = deck_parsed.load();
+    if (was_set){
+      deck_parsed.store(false);
+    }
+    return was_set;
+  }
   void disconnect() {
     if (connected) {
       connected = false;
@@ -213,6 +222,8 @@ private:
     
   bool parse_deck(std::string &raw_data){
     std::cout<<"parse_deck -> starting deck_parsing..."<<std::endl;
+    player_info.main.clear();
+    player_info.side.clear();
     std::stringstream is(raw_data);
     std::string line;
     int copies;
@@ -230,6 +241,7 @@ private:
         std::cout<<"Something went wrong during parsing.\n";
         return false;
       }
+      name.pop_back(); // remove newline from card name.
       for(int i = 0; i < copies; i++){
         // add card to either sideboard or main deck
         if(sideboard)
@@ -253,6 +265,7 @@ private:
     if (message == MESSAGE_correct_deck_upload){
       if(parse_deck(last_deck)){
         std::cout<<"[handle_message] Parsing succeded.\n";
+        deck_parsed.store(true);
       }
     } 
   }
@@ -323,7 +336,7 @@ int main() {
   SDL_Rect main_area;
 
   main_area.x = 0; main_area.y=0;
-  main_area.h = window_h - console_h-input_h;
+  main_area.h = window_h-console_h-input_h;
   main_area.w = window_w;
 
   try {
@@ -344,7 +357,6 @@ int main() {
                                           SDL_WINDOWPOS_CENTERED,
                                           window_w, window_h,
                                           SDL_WINDOW_SHOWN | SDL_WINDOW_RESIZABLE);
-
     if (!window) {
       std::cerr << "Window could not be created! SDL_Error: " << SDL_GetError() << "\n";
       TTF_Quit();
@@ -374,16 +386,18 @@ int main() {
         return 1;
       }
     }
-    
-    // UI components
+ 
+    // ==================== Main UI components ====================
     TextInput text_input;
     MessageLog message_log;
     DeckVisualizer deck_visualizer(renderer, font, main_area);
-    
+    // ============================================================
+
+
     // Connect to server
     client.connect_to_server("127.0.0.1", 5000);
     message_log.add_message("Connecting to server...");
-    
+ 
     // Main game loop
     bool quit = false;
     SDL_Event e;
@@ -392,6 +406,7 @@ int main() {
       // Process events
       int mouseX, mouseY;
       SDL_GetMouseState(&mouseX, &mouseY);
+      // send mouse position to deck visualizer.
       deck_visualizer.mouseX = mouseX;
       deck_visualizer.mouseY = mouseY;
       while (SDL_PollEvent(&e) != 0) { // polling events from SDL
@@ -418,10 +433,9 @@ int main() {
                 std::string path = command_text.substr(7);
                 Command cmd = client.create_command_from_input(CommandCode::UploadDeck, path);
                 if (cmd.code != CommandCode::Invalid) {
-                  client.send_command(cmd);
-                }
+                  client.send_command(cmd);                }
               } else {
-                message_log.add_message("Unknown command: " + command_text);
+                message_log.add_message("[CLIENT] Unknown command: " + command_text);
               } 
               text_input.clear();
             }
@@ -449,6 +463,9 @@ int main() {
       while (client.pop_message(message)) {
         message_log.add_message(message);
       } 
+      if(client.check_clear_deck_parsed()){
+        deck_visualizer.reset_for_new_deck();
+      }
       // Clear screen
       SDL_SetRenderDrawColor(renderer, 40, 44, 52, 255);
       SDL_RenderClear(renderer); 
@@ -473,7 +490,7 @@ int main() {
       int start_index = std::max(0, (int)messages.size() - max_lines);
       int y_pos = window_h - console_h + MARGIN;
 
-      for (int i = start_index; i < messages.size(); i++) {
+      for (size_t i = start_index; i < messages.size(); i++) {
         // Don't render beyond the available space
         if (y_pos + 20 > window_h - input_h - MARGIN) {
             break;
@@ -504,7 +521,7 @@ int main() {
       SDL_RenderFillRect(renderer, &status_rect);
        
       // Draw help text
-      render_text(renderer, font, "Commands: upload <path>, pass, resign, quit", 
+      render_text(renderer, font, "Commands: upload, quit", 
                MARGIN, 10, {200, 200, 200, 255});
    
       // Present renderer

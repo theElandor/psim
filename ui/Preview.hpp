@@ -18,8 +18,7 @@ public:
     
     // Render the preview for a given card
     void render(RenderedCard* card) {
-        if (!card || !font) return;
-        
+        if (!card || !font) return; 
         // Set viewport to preview area
         SDL_Rect original_viewport;
         SDL_RenderGetViewport(renderer, &original_viewport);
