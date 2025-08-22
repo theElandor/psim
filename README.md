@@ -14,8 +14,11 @@ then run a server with
 ```
 ./server_app
 ```
-and two clients on different terminals with
+Run a sample client with:
 ```
 ./client_app
 ```
-then type "upload <path>" on the client with priority to see your deck visualized.
+then use "upload <path>" in the command window to upload a sample deck and trigger a deck
+visualization demo.
+
+![screenshot](client.png)
