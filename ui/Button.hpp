@@ -1,10 +1,13 @@
 #pragma once
+#include <SDL2/SDL_events.h>
 #include <string>
+#include "Utils.hpp"
 #include <SDL2/SDL.h>
 #include <SDL2/SDL_ttf.h>
 
 class Button {
 public:
+    int mouseX, mouseY; 
     Button(int x, int y, int w, int h,
          const std::string& text = "Button",
          SDL_Color color = {200, 200, 200, 255},
@@ -21,9 +24,23 @@ public:
          clickColor(clickColor),
          textColor(textColor) {}
 
+    void update_hovered(){
+      if(point_in_rect(mouseX, mouseY, rect)){
+        hovered = true;
+      }
+      else{hovered = false;}
+    }
+    void update_clicked(SDL_Event &e){
+      if(point_in_rect(mouseX, mouseY, rect)){
+        if(e.type == SDL_MOUSEBUTTONDOWN){setClicked(true);}
+        else{setClicked(false);}
+      }
+    }
+
     void render(SDL_Renderer* renderer, TTF_Font* font) {
       // Determine button color based on state
       SDL_Color currentColor = color;
+      update_hovered();
       if (clicked) {
         currentColor = clickColor;
       } else if (hovered) {

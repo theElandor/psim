@@ -4,6 +4,8 @@
 #include <iostream>
 #include <SDL2/SDL_ttf.h>
 #include <SDL2/SDL.h>
+#include <SDL2/SDL_image.h>
+
 
 SDL_Texture* loadTextureFromMemory(SDL_Renderer* renderer, const std::vector<unsigned char>& imageData) {
   /*

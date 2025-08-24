@@ -439,6 +439,10 @@ int main() {
       // send mouse position to deck visualizer.
       deck_visualizer.mouseX = mouseX;
       deck_visualizer.mouseY = mouseY;
+      // send mouse position to button
+      upload_button.mouseX = mouseX;
+      upload_button.mouseY = mouseY;
+
       while (SDL_PollEvent(&e) != 0) { // polling events from SDL
         if (e.type == SDL_QUIT) {
             quit = true;
@@ -486,6 +490,7 @@ int main() {
         else if(e.type == SDL_MOUSEWHEEL){
           deck_visualizer.handle_scroll(e.wheel.y);
         }
+        upload_button.update_clicked(e);
         text_input.handle_event(e);
       } 
       // Process network messages
