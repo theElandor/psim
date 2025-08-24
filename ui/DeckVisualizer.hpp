@@ -15,10 +15,8 @@
 
 #define PADDING 20
 #define TITLE_PORTION 0.1
-#define PREVIEW_MARGIN 10
-#define BUTTON_WIDTH 120
-#define BUTTON_HEIGHT 30
-#define BUTTON_MARGIN 10
+#define TOP_MARGIN 10
+#define SIDE_MARGIN 10
 #define SCROLL_BUFFER 400.0
 
 struct Column{
@@ -138,15 +136,15 @@ private:
   void update_areas() {
     // Calculate deck area (left side, excluding preview)
     deck_area.x = 0;
-    deck_area.y = 0;
-    deck_area.w = area.w - preview_width - PREVIEW_MARGIN;
+    deck_area.y = TOP_MARGIN;
+    deck_area.w = area.w - preview_width - SIDE_MARGIN;
     deck_area.h = area.h;
     
     // Calculate preview area (right side)
-    preview_area.x = deck_area.w + PREVIEW_MARGIN;
-    preview_area.y = PREVIEW_MARGIN;
+    preview_area.x = deck_area.w + SIDE_MARGIN;
+    preview_area.y = TOP_MARGIN;
     preview_area.w = preview_width - PREVIEW_MARGIN;
-    preview_area.h = area.h - 2 * PREVIEW_MARGIN;
+    preview_area.h = deck_area.h; 
   }
 
   void render_loading_popup() {
@@ -275,7 +273,7 @@ private:
     
     int col_width = deck_area.w / cols.size();
     float maxContentHeight = get_max_content_height(col_width);
-    float viewportHeight = deck_area.h - BUTTON_HEIGHT - BUTTON_MARGIN;
+    float viewportHeight = deck_area.h;
     
     if (maxContentHeight <= viewportHeight) {
         // Content fits entirely in viewport - no scrolling needed
@@ -301,7 +299,7 @@ private:
     clipRect.x = c.x;
     clipRect.y = 0;
     clipRect.w = col_width;
-    clipRect.h = win_h - BUTTON_HEIGHT - BUTTON_MARGIN;
+    clipRect.h = win_h;
     SDL_RenderSetClipRect(renderer, &clipRect);
     
     for(size_t i = 0; i < c.cards.size(); i++){
@@ -315,12 +313,12 @@ private:
       rect.y = static_cast<int>(offset*i + scrollOffset);  // Apply scroll offset here
       
       // Only render if the card is visible (within the clipped area)
-      if (rect.y + rect.h > 0 && rect.y < win_h - BUTTON_HEIGHT - BUTTON_MARGIN) {
+      if (rect.y + rect.h > 0 && rect.y < win_h) {
         SDL_RenderCopy(renderer, c.cards[i].texture, nullptr, &rect);
         
         // Check if mouse is hovering over this card (after rendering)
         if (point_in_rect(mouseX, mouseY, rect) && 
-            mouseY < win_h - BUTTON_HEIGHT - BUTTON_MARGIN) { // Don't hover if mouse is over button area
+            mouseY < win_h) { // Don't hover if mouse is over button area
           hoveredCard = &c.cards[i];
         }
       }

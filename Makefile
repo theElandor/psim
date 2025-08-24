@@ -15,3 +15,9 @@ client_app:
 
 clean:
 	rm -f server_app client_app
+
+cclient:
+	rm client_app
+
+cserver:
+	rm server_app

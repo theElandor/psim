@@ -1,5 +1,4 @@
 #include <SDL2/SDL_events.h>
-#include <SDL2/SDL_rect.h>
 #include <iostream>
 #include <iterator>
 #include <string>
@@ -335,7 +334,7 @@ public:
   void clear() { messages.clear(); }
 };
 
-SDL_Rect get_main_area(int window_h, int window_w, int console_h, int input_h){
+SDL_Rect compute_main_area(int window_h, int window_w, int console_h, int input_h){
    /*
     * This function computes the Rectangle coresponding to the area that contains
     * the deck visualizer and the card renderer. It should be refactored:
@@ -349,22 +348,13 @@ SDL_Rect get_main_area(int window_h, int window_w, int console_h, int input_h){
   main_area.w = window_w; 
   return main_area;
 }
- 
-SDL_Rect get_upload_button_area(SDL_Rect main_area){
-  SDL_Rect button_area;
-  button_area.x = main_area.w - BUTTON_WIDTH - BUTTON_MARGIN;
-  button_area.y = main_area.h + BUTTON_AREA_H / 2 + BUTTON_MARGIN;
-  button_area.w = BUTTON_WIDTH;
-  button_area.h = BUTTON_HEIGHT;
-  return button_area;
-} 
+
 int main() {
   int window_w = 1000;
   int window_h = 700;
   int console_h = window_h / 4;
   int input_h = console_h / 5;
-  SDL_Rect main_area = get_main_area(window_h, window_w, console_h, input_h);
-  SDL_Rect upload_button_area = get_upload_button_area(main_area); 
+  SDL_Rect main_area = compute_main_area(window_h, window_w, console_h, input_h);
   try {
     GameClient client;
     // Initialize SDL and SDL_ttf
@@ -412,15 +402,12 @@ int main() {
         return 1;
       }
     }
+ 
     // ==================== Main UI components ====================
     TextInput text_input;
     MessageLog message_log;
     DeckVisualizer deck_visualizer(renderer, font, main_area);
-    Button upload_button(upload_button_area.x, 
-                         upload_button_area.y, 
-                         upload_button_area.w,
-                         upload_button_area.h,
-                         "Upload Deck");
+    Button upload_button(main_area.w - BUTTON_WIDTH, main_area.h, BUTTON_WIDTH, BUTTON_HEIGHT);
     // ============================================================
 
 
@@ -478,9 +465,7 @@ int main() {
           console_h = window_h / 4;
           input_h = console_h / 5;
           // recompute main area size
-          main_area = get_main_area(window_h,window_w,console_h,input_h);
-          upload_button_area = get_upload_button_area(main_area);
-          upload_button.setArea(upload_button_area);
+          main_area = compute_main_area(window_h,window_w,console_h,input_h);
           deck_visualizer.update_display_area(main_area);
         }
         else if(e.type == SDL_MOUSEWHEEL){

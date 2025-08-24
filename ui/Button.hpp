@@ -64,6 +64,9 @@ public:
       rect.w = w;
       rect.h = h;
     }
+    void setArea(SDL_Rect area){
+      rect = area;
+    }
 
     // Getters for interaction
     SDL_Rect getRect() const { return rect; }
