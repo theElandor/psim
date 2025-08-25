@@ -98,7 +98,10 @@ public:
     // Clamp scroll offset
     clamp_scroll_offset();
   }
-  
+  void setMouse(int x, int y){
+    mouseX = x;
+    mouseY = y;
+  } 
   void renderDeck(std::vector<Card> &deck){
     if(!columns_initialized && loading_state == LoadingState::IDLE){
       initialize_columns_async(deck);
@@ -113,8 +116,8 @@ public:
     SDL_RenderSetViewport(renderer, &area);
     
     // Clear the area
-    SDL_SetRenderDrawColor(renderer, 0, 0, 0, 255);
-    SDL_RenderClear(renderer);
+    // SDL_SetRenderDrawColor(renderer, 0, 0, 0, 255);
+    // SDL_RenderClear(renderer);
 
     // Show loading popup if still loading
     if (loading_state == LoadingState::LOADING) {

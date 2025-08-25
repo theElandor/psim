@@ -21,6 +21,8 @@
 #include "Command.hpp"
 #include "DeckVisualizer.hpp"
 #include "Messages.hpp"
+#include "tinyfiledialogs.h"
+#include "Utils.hpp"
 
 #define BUTTON_AREA_H 50
 
@@ -377,6 +379,12 @@ int main() {
       SDL_Quit();
       return 1;
     }
+    if (!(IMG_Init(IMG_INIT_PNG | IMG_INIT_JPG) & (IMG_INIT_PNG | IMG_INIT_JPG))) {
+      std::cerr << "SDL_image could not initialize! SDL_image Error: " << IMG_GetError() << std::endl;
+      TTF_Quit();
+      SDL_Quit();
+      return 1;
+    }
     // Create window and renderer
     SDL_Window* window = SDL_CreateWindow("Psim Client",
                                           SDL_WINDOWPOS_CENTERED,
@@ -412,17 +420,48 @@ int main() {
         return 1;
       }
     }
+    // Load background texture
+    SDL_Texture* backgroundTexture = loadTexture("textures/background.png", renderer);
+      if (!backgroundTexture) {
+        // Try different common image formats
+        backgroundTexture = loadTexture("textures/background.jpg", renderer);
+        if (!backgroundTexture) {
+            backgroundTexture = loadTexture("textures/background.jpeg", renderer);
+            if (!backgroundTexture) {
+                std::cerr << "Could not load background image from textures/ folder" << std::endl;
+                // Continue without background - don't exit
+            }
+        }
+    }
     // ==================== Main UI components ====================
     TextInput text_input;
     MessageLog message_log;
     DeckVisualizer deck_visualizer(renderer, font, main_area);
-    Button upload_button(upload_button_area.x, 
-                         upload_button_area.y, 
-                         upload_button_area.w,
-                         upload_button_area.h,
-                         "Upload Deck");
+    Button upload_button(upload_button_area,"Upload Deck");
     // ============================================================
+// Set up the upload button callback
+    upload_button.setOnClick([&client, &message_log]() {
+        // Only open file dialog once per actual click
+        const char* filters[] = { "*.txt" };
+        const char* path = tinyfd_openFileDialog(
+            "Upload Deck",
+            "",
+            1, filters,
+            "Deck files (.txt)",
+            0
+        );
 
+        if (path) {
+            std::cout << "User selected " << path << std::endl;
+            Command cmd = client.create_command_from_input(CommandCode::UploadDeck, path);
+            if (cmd.code != CommandCode::Invalid) {
+                client.send_command(cmd);
+            }
+        } else {
+            std::cout << "User cancelled." << std::endl;
+            message_log.add_message("File selection cancelled");
+        }
+    });
 
     // Connect to server
     client.connect_to_server("127.0.0.1", 5000);
@@ -436,12 +475,8 @@ int main() {
       // Process events
       int mouseX, mouseY;
       SDL_GetMouseState(&mouseX, &mouseY);
-      // send mouse position to deck visualizer.
-      deck_visualizer.mouseX = mouseX;
-      deck_visualizer.mouseY = mouseY;
-      // send mouse position to button
-      upload_button.mouseX = mouseX;
-      upload_button.mouseY = mouseY;
+      deck_visualizer.setMouse(mouseX, mouseY);
+      upload_button.setMouse(mouseX, mouseY);
 
       while (SDL_PollEvent(&e) != 0) { // polling events from SDL
         if (e.type == SDL_QUIT) {
@@ -476,16 +511,17 @@ int main() {
           }
         } 
         else if (e.type == SDL_WINDOWEVENT && (e.window.event == SDL_WINDOWEVENT_RESIZED || e.window.event == SDL_WINDOWEVENT_SIZE_CHANGED)){
-          window_w = e.window.data1;  // updated width
-          window_h = e.window.data2;  // updated height    
-          // recompute
+          // ================== Get update window dimensions ==========
+          window_w = e.window.data1; 
+          window_h = e.window.data2;  
           console_h = window_h / 4;
           input_h = console_h / 5;
-          // recompute main area size
+          // ================== Update areas dimensions ==============
           main_area = get_main_area(window_h,window_w,console_h,input_h);
+          deck_visualizer.update_display_area(main_area);
           upload_button_area = get_upload_button_area(main_area);
           upload_button.setArea(upload_button_area);
-          deck_visualizer.update_display_area(main_area);
+          // =========================================================
         }
         else if(e.type == SDL_MOUSEWHEEL){
           deck_visualizer.handle_scroll(e.wheel.y);
@@ -508,6 +544,9 @@ int main() {
       SDL_SetRenderDrawColor(renderer, 30, 30, 30, 255);
       SDL_Rect game_rect = {0, 0, window_w, window_h - console_h};
       SDL_RenderFillRect(renderer, &game_rect); 
+      if (backgroundTexture){
+        renderBackground(renderer, backgroundTexture, main_area);
+      }
       if(client.player_info.main.size() != 0){
         deck_visualizer.renderDeck(client.player_info.main);
       }
@@ -569,6 +608,9 @@ int main() {
     }
     
     // Cleanup
+    if(backgroundTexture){
+      SDL_DestroyTexture(backgroundTexture);
+    }
     client.disconnect();
     TTF_CloseFont(font);
     SDL_DestroyRenderer(renderer);

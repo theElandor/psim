@@ -2,7 +2,7 @@ CXX = g++
 CXXFLAGS = -std=c++17 -Wall -pthread -I./include -I./common -I./ui
 
 SERVER_SRCS = server/ServerMain.cpp
-CLIENT_SRCS = client/ClientMain.cpp
+CLIENT_SRCS = client/ClientMain.cpp include/tinyfiledialogs.c
 
 all: server_app client_app
 

@@ -4,17 +4,17 @@
 #include "Utils.hpp"
 #include <SDL2/SDL.h>
 #include <SDL2/SDL_ttf.h>
+#include <functional>
 
 class Button {
 public:
-    int mouseX, mouseY; 
-    Button(int x, int y, int w, int h,
+    Button(SDL_Rect area,
          const std::string& text = "Button",
          SDL_Color color = {200, 200, 200, 255},
          SDL_Color hoverColor = {170, 170, 170, 255},
          SDL_Color clickColor = {140, 140, 140, 255},
          SDL_Color textColor = {0, 0, 0, 255}):
-         rect{x, y, w, h},
+         rect{area},
          pressed(false),
          hovered(false),
          clicked(false),
@@ -22,7 +22,8 @@ public:
          color(color),
          hoverColor(hoverColor),
          clickColor(clickColor),
-         textColor(textColor) {}
+         textColor(textColor),
+         onClick(nullptr) {}
 
     void update_hovered(){
       if(point_in_rect(mouseX, mouseY, rect)){
@@ -30,10 +31,24 @@ public:
       }
       else{hovered = false;}
     }
+
     void update_clicked(SDL_Event &e){
-      if(point_in_rect(mouseX, mouseY, rect)){
-        if(e.type == SDL_MOUSEBUTTONDOWN){setClicked(true);}
-        else{setClicked(false);}
+      if (point_in_rect(mouseX, mouseY, rect)) {
+          if (!clicked && e.type == SDL_MOUSEBUTTONDOWN && e.button.button == SDL_BUTTON_LEFT) {
+            setClicked(true);
+          }
+          else if (clicked && e.type == SDL_MOUSEBUTTONUP && e.button.button == SDL_BUTTON_LEFT) {
+              setClicked(false);
+              // Only trigger action on mouse up (complete click)
+              if (onClick) {
+                  onClick();
+              }
+          }
+      } else {
+          // Reset clicked state if mouse moves outside button
+          if (e.type == SDL_MOUSEBUTTONUP && e.button.button == SDL_BUTTON_LEFT) {
+              setClicked(false);
+          }
       }
     }
 
@@ -84,7 +99,16 @@ public:
     void setArea(SDL_Rect area){
       rect = area;
     }
-
+    void setMouse(int x, int y){
+      mouseX = x;
+      mouseY = y;
+    }
+    
+    // Set callback function for button clicks
+    void setOnClick(std::function<void()> callback) {
+        onClick = callback;
+    }
+    
     // Getters for interaction
     SDL_Rect getRect() const { return rect; }
     bool isPressed() const { return pressed; }
@@ -99,6 +123,7 @@ public:
     void setHoverColor(SDL_Color newColor){hoverColor = newColor;}
 
 private:
+    int mouseX, mouseY;
     SDL_Rect rect;
     bool pressed;
     bool hovered;
@@ -108,5 +133,5 @@ private:
     SDL_Color hoverColor;
     SDL_Color clickColor;
     SDL_Color textColor;
+    std::function<void()> onClick; // Callback function for button clicks
 };
-

@@ -41,3 +41,45 @@ void render_text(SDL_Renderer* renderer, TTF_Font* font, const std::string& text
       SDL_DestroyTexture(texture);
   }
 }
+SDL_Texture* loadTexture(const std::string& path, SDL_Renderer* renderer) {
+    SDL_Surface* surface = IMG_Load(path.c_str());
+    if (!surface) {
+        std::cerr << "Unable to load image " << path << "! SDL_image Error: " << IMG_GetError() << std::endl;
+        return nullptr;
+    }
+    
+    SDL_Texture* texture = SDL_CreateTextureFromSurface(renderer, surface);
+    SDL_FreeSurface(surface);
+    
+    if (!texture) {
+        std::cerr << "Unable to create texture from " << path << "! SDL Error: " << SDL_GetError() << std::endl;
+        return nullptr;
+    }
+    
+    return texture;
+}
+
+void renderBackground(SDL_Renderer* renderer, SDL_Texture* backgroundTexture, SDL_Rect area) {
+    if (!backgroundTexture) return;
+    
+    // Get original texture dimensions
+    int textureWidth, textureHeight;
+    SDL_QueryTexture(backgroundTexture, nullptr, nullptr, &textureWidth, &textureHeight);
+    
+    // Calculate scaling to cover the entire area while maintaining aspect ratio
+    float scaleX = (float)area.w / textureWidth;
+    float scaleY = (float)area.h / textureHeight;
+    float scale = std::max(scaleX, scaleY); // Use max to ensure full coverage
+    
+    int scaledWidth = (int)(textureWidth * scale);
+    int scaledHeight = (int)(textureHeight * scale);
+    
+    // Center the scaled image
+    SDL_Rect destRect;
+    destRect.x = area.x + (area.w - scaledWidth) / 2;
+    destRect.y = area.y + (area.h - scaledHeight) / 2;
+    destRect.w = scaledWidth;
+    destRect.h = scaledHeight;
+    
+    SDL_RenderCopy(renderer, backgroundTexture, nullptr, &destRect);
+}
