@@ -61,25 +61,24 @@ SDL_Texture* loadTexture(const std::string& path, SDL_Renderer* renderer) {
 
 void renderBackground(SDL_Renderer* renderer, SDL_Texture* backgroundTexture, SDL_Rect area) {
     if (!backgroundTexture) return;
-    
-    // Get original texture dimensions
-    int textureWidth, textureHeight;
-    SDL_QueryTexture(backgroundTexture, nullptr, nullptr, &textureWidth, &textureHeight);
-    
-    // Calculate scaling to cover the entire area while maintaining aspect ratio
-    float scaleX = (float)area.w / textureWidth;
-    float scaleY = (float)area.h / textureHeight;
-    float scale = std::max(scaleX, scaleY); // Use max to ensure full coverage
-    
-    int scaledWidth = (int)(textureWidth * scale);
-    int scaledHeight = (int)(textureHeight * scale);
-    
-    // Center the scaled image
-    SDL_Rect destRect;
-    destRect.x = area.x + (area.w - scaledWidth) / 2;
-    destRect.y = area.y + (area.h - scaledHeight) / 2;
-    destRect.w = scaledWidth;
-    destRect.h = scaledHeight;
-    
-    SDL_RenderCopy(renderer, backgroundTexture, nullptr, &destRect);
+    SDL_RenderCopy(renderer, backgroundTexture, nullptr, &area);
 }
+void renderIcon(SDL_Renderer* renderer, SDL_Texture* texture, SDL_Rect area) {
+    if (!texture) return;
+
+    int texW, texH;
+    SDL_QueryTexture(texture, nullptr, nullptr, &texW, &texH);
+
+    float scaleX = (float)area.w / texW;
+    float scaleY = (float)area.h / texH;
+    float scale = std::min(scaleX, scaleY);  // fit inside
+
+    SDL_Rect icon;
+    icon.w = (int)(texW * scale);
+    icon.h = (int)(texH * scale);
+    icon.x = area.x + (area.w - icon.w) / 2;
+    icon.y = area.y + (area.h - icon.h) / 2;
+
+    SDL_RenderCopy(renderer, texture, nullptr, &icon);
+}
+

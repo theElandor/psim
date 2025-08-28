@@ -141,13 +141,13 @@ private:
     deck_area.x = 0;
     deck_area.y = TOP_MARGIN;
     deck_area.w = area.w - preview_width - SIDE_MARGIN;
-    deck_area.h = area.h;
+    deck_area.h = area.h - TOP_MARGIN;
     
     // Calculate preview area (right side)
     preview_area.x = deck_area.w + SIDE_MARGIN;
     preview_area.y = TOP_MARGIN;
     preview_area.w = preview_width - PREVIEW_MARGIN;
-    preview_area.h = deck_area.h; 
+    preview_area.h = deck_area.h - TOP_MARGIN; 
   }
 
   void render_loading_popup() {

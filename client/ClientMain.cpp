@@ -347,7 +347,7 @@ SDL_Rect get_main_area(int window_h, int window_w, int console_h, int input_h){
    SDL_Rect main_area;
 
   main_area.x = 0; main_area.y=0;
-  main_area.h = window_h-console_h-input_h - BUTTON_AREA_H;
+  main_area.h = window_h-console_h-input_h-BUTTON_AREA_H;
   main_area.w = window_w; 
   return main_area;
 }
@@ -422,17 +422,7 @@ int main() {
     }
     // Load background texture
     SDL_Texture* backgroundTexture = loadTexture("textures/background.png", renderer);
-      if (!backgroundTexture) {
-        // Try different common image formats
-        backgroundTexture = loadTexture("textures/background.jpg", renderer);
-        if (!backgroundTexture) {
-            backgroundTexture = loadTexture("textures/background.jpeg", renderer);
-            if (!backgroundTexture) {
-                std::cerr << "Could not load background image from textures/ folder" << std::endl;
-                // Continue without background - don't exit
-            }
-        }
-    }
+    SDL_Texture* uploadTexture = loadTexture("textures/upload.png", renderer);
     // ==================== Main UI components ====================
     TextInput text_input;
     MessageLog message_log;
@@ -551,7 +541,11 @@ int main() {
         deck_visualizer.renderDeck(client.player_info.main);
       }
       // Render buttons
-      upload_button.render(renderer, font);
+      // upload_button.render(renderer, font);
+      upload_button.render(renderer, nullptr);
+      if (uploadTexture){
+        renderIcon(renderer, uploadTexture, upload_button_area);
+      }
       // Draw console area
       SDL_SetRenderDrawColor(renderer, 50, 50, 50, 255);
       SDL_Rect console_rect = {0, window_h - console_h, window_w , console_h};
