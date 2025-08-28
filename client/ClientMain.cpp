@@ -360,6 +360,25 @@ SDL_Rect get_upload_button_area(SDL_Rect main_area){
   button_area.h = BUTTON_HEIGHT;
   return button_area;
 } 
+SDL_Rect get_sideboard_button_area(SDL_Rect main_area){
+  SDL_Rect button_area;
+  // take upload button rect as a reference.
+  SDL_Rect upload_button_area = get_upload_button_area(main_area);
+  button_area.x = upload_button_area.x - BUTTON_WIDTH - BUTTON_MARGIN;
+  button_area.y = upload_button_area.y;
+  button_area.w = BUTTON_WIDTH;
+  button_area.h = BUTTON_HEIGHT;
+  return button_area;
+}
+SDL_Rect get_quit_button_area(SDL_Rect main_area){
+  SDL_Rect button_area;
+  SDL_Rect sideboard_button_area = get_sideboard_button_area(main_area);
+  button_area.x = sideboard_button_area.x - BUTTON_WIDTH - BUTTON_MARGIN;
+  button_area.y = sideboard_button_area.y;
+  button_area.w = BUTTON_WIDTH;
+  button_area.h = BUTTON_HEIGHT;
+  return button_area;
+}
 int main() {
   int window_w = 1000;
   int window_h = 700;
@@ -367,6 +386,8 @@ int main() {
   int input_h = console_h / 5;
   SDL_Rect main_area = get_main_area(window_h, window_w, console_h, input_h);
   SDL_Rect upload_button_area = get_upload_button_area(main_area); 
+  SDL_Rect sideboard_button_area = get_sideboard_button_area(main_area);
+  SDL_Rect quit_button_area = get_quit_button_area(main_area);
   try {
     GameClient client;
     // Initialize SDL and SDL_ttf
@@ -428,29 +449,30 @@ int main() {
     MessageLog message_log;
     DeckVisualizer deck_visualizer(renderer, font, main_area);
     Button upload_button(upload_button_area,"Upload Deck");
+    Button sideboard_button(sideboard_button_area, "Sideboard");
+    Button quit_button(quit_button_area, "Quit");
     // ============================================================
-// Set up the upload button callback
+    /* Upload button callback. Depends on tinyfiledialogs. */
     upload_button.setOnClick([&client, &message_log]() {
-        // Only open file dialog once per actual click
-        const char* filters[] = { "*.txt" };
-        const char* path = tinyfd_openFileDialog(
-            "Upload Deck",
-            "",
-            1, filters,
-            "Deck files (.txt)",
-            0
-        );
-
-        if (path) {
-            std::cout << "User selected " << path << std::endl;
-            Command cmd = client.create_command_from_input(CommandCode::UploadDeck, path);
-            if (cmd.code != CommandCode::Invalid) {
-                client.send_command(cmd);
-            }
-        } else {
-            std::cout << "User cancelled." << std::endl;
-            message_log.add_message("File selection cancelled");
+      // Only open file dialog once per actual click
+      const char* filters[] = { "*.txt" };
+      const char* path = tinyfd_openFileDialog(
+        "Upload Deck",
+        "",
+        1, filters,
+        "Deck files (.txt)",
+        0
+      );
+      if (path) {
+        std::cout << "User selected " << path << std::endl;
+        Command cmd = client.create_command_from_input(CommandCode::UploadDeck, path);
+        if (cmd.code != CommandCode::Invalid) {
+          client.send_command(cmd);
         }
+      } else {
+        std::cout << "User cancelled." << std::endl;
+        message_log.add_message("File selection cancelled");
+      }
     });
 
     // Connect to server
@@ -467,6 +489,8 @@ int main() {
       SDL_GetMouseState(&mouseX, &mouseY);
       deck_visualizer.setMouse(mouseX, mouseY);
       upload_button.setMouse(mouseX, mouseY);
+      quit_button.setMouse(mouseX, mouseY);
+      sideboard_button.setMouse(mouseX, mouseY);
 
       while (SDL_PollEvent(&e) != 0) { // polling events from SDL
         if (e.type == SDL_QUIT) {
@@ -510,13 +534,19 @@ int main() {
           main_area = get_main_area(window_h,window_w,console_h,input_h);
           deck_visualizer.update_display_area(main_area);
           upload_button_area = get_upload_button_area(main_area);
+          sideboard_button_area = get_sideboard_button_area(main_area);
+          quit_button_area = get_quit_button_area(main_area);
           upload_button.setArea(upload_button_area);
+          sideboard_button.setArea(sideboard_button_area);
+          quit_button.setArea(quit_button_area);
           // =========================================================
         }
         else if(e.type == SDL_MOUSEWHEEL){
           deck_visualizer.handle_scroll(e.wheel.y);
         }
         upload_button.update_clicked(e);
+        sideboard_button.update_clicked(e);
+        quit_button.update_clicked(e);
         text_input.handle_event(e);
       } 
       // Process network messages
@@ -543,6 +573,8 @@ int main() {
       // Render buttons
       // upload_button.render(renderer, font);
       upload_button.render(renderer, nullptr);
+      quit_button.render(renderer, font);
+      sideboard_button.render(renderer, font);
       if (uploadTexture){
         renderIcon(renderer, uploadTexture, upload_button_area);
       }

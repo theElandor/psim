@@ -65,7 +65,6 @@ void renderBackground(SDL_Renderer* renderer, SDL_Texture* backgroundTexture, SD
 }
 void renderIcon(SDL_Renderer* renderer, SDL_Texture* texture, SDL_Rect area) {
     if (!texture) return;
-
     int texW, texH;
     SDL_QueryTexture(texture, nullptr, nullptr, &texW, &texH);
 
