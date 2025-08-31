@@ -477,6 +477,11 @@ int main() {
     quit_button.setOnClick([&client](){
       client.send_command(Command(CommandCode::Quit));
       SDL_Quit();
+    });  
+    bool render_side = false;
+    sideboard_button.setOnClick([&render_side, &deck_visualizer](){
+      deck_visualizer.reset_for_new_deck();
+      render_side = !render_side;
     });
     // Connect to server
     client.connect_to_server("127.0.0.1", 5000);
@@ -572,7 +577,10 @@ int main() {
         renderBackground(renderer, backgroundTexture, main_area);
       }
       if(client.player_info.main.size() != 0){
-        deck_visualizer.renderDeck(client.player_info.main);
+        if(render_side)
+          deck_visualizer.renderDeck(client.player_info.side);
+        else
+          deck_visualizer.renderDeck(client.player_info.main);
       }
       // Render buttons
       // upload_button.render(renderer, font);

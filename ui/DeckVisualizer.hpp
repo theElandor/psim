@@ -328,6 +328,11 @@ private:
   }
 
   void initialize_columns_async(std::vector<Card>& deck) {
+    size_t cards_per_col = 16;
+    if(deck.size() <= 15){
+      // then we are rendering sideboard
+      cards_per_col = 4;
+    }
     loading_state = LoadingState::LOADING;
     total_tasks = 0;
     completed_tasks = 0;
@@ -342,14 +347,13 @@ private:
     for (const auto& card : deck) {
       cardCounts[card.title]++;
     }
-    
     // Create columns and tasks
     Column col;
     col.x = 0; col.y = 0; col.cmc = -1;
     size_t current_column = 0;
     
     for (const auto& pair : cardCounts) {
-      if (col.cards.size() + pair.second > 16) {
+      if (col.cards.size() + pair.second > cards_per_col) {
         // Start new column
         if (!col.cards.empty()) {
           cols.push_back(col);
