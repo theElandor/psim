@@ -4,7 +4,7 @@ It has to be really simple: you upload a deck, connect to a server and play.\
 I started this project also to learn SDL and C++ async programming.\
 The original plan was to start with [pauper](https://www.mtggoldfish.com/metagame/pauper#paper) staples to reduce the workload, with the option to expand later.\
 If you look at it carefully, it is an ambitious project. It requires deep knowledge of [SDL](https://wiki.libsdl.org/wiki/index) programming, C++ multithreading, sockets with async operations, networking and last but not least [MTG rules](https://media.wizards.com/2025/downloads/MagicCompRules%2020250725.pdf).\
-Feel free to contribute.\
+Feel free to contribute.
 
 # Other similar projects
 + https://cockatrice.github.io/
@@ -30,11 +30,12 @@ Run a sample client with:
 ```
 ./client_app
 ```
-You can use the buttons to upload a deck, toggle the sideboard visualization, and quit th client.\
+You can use the buttons to upload a deck, toggle the sideboard visualization, and quit th client.
 
 ![screenshot](client.png)
 
-# Features that would be nice to add:
+# Features to add
+## Deck visualizer
 + Add the possibility of dragging cards around;
 + Add a left panel with recent decks;
 + Don't re-initialize columns for sideboard view toggle for faster switch;
