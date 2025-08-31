@@ -451,7 +451,7 @@ int main() {
     Button upload_button(upload_button_area,"Upload Deck");
     Button sideboard_button(sideboard_button_area, "Sideboard");
     Button quit_button(quit_button_area, "Quit");
-    // ============================================================
+    // ==========================================================
     /* Upload button callback. Depends on tinyfiledialogs. */
     upload_button.setOnClick([&client, &message_log]() {
       // Only open file dialog once per actual click
@@ -474,7 +474,10 @@ int main() {
         message_log.add_message("File selection cancelled");
       }
     });
-
+    quit_button.setOnClick([&client](){
+      client.send_command(Command(CommandCode::Quit));
+      SDL_Quit();
+    });
     // Connect to server
     client.connect_to_server("127.0.0.1", 5000);
     message_log.add_message("Connecting to server...");
@@ -510,6 +513,7 @@ int main() {
               // Handle special commands
               if (command_text == "quit") {
                   client.send_command(Command(CommandCode::Quit));
+                  SDL_Quit();
               } else if (command_text == "resign") {
                   client.send_command(Command(CommandCode::Resign));
               }else if (command_text.find("upload ") == 0) {

@@ -115,10 +115,6 @@ public:
     SDL_RenderGetViewport(renderer, &original_viewport);
     SDL_RenderSetViewport(renderer, &area);
     
-    // Clear the area
-    // SDL_SetRenderDrawColor(renderer, 0, 0, 0, 255);
-    // SDL_RenderClear(renderer);
-
     // Show loading popup if still loading
     if (loading_state == LoadingState::LOADING) {
       render_loading_popup();
