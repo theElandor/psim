@@ -551,7 +551,25 @@ int main() {
           // =========================================================
         }
         else if(e.type == SDL_MOUSEWHEEL){
-          deck_visualizer.handle_scroll(e.wheel.y);
+          const Uint8* keystate = SDL_GetKeyboardState(NULL);
+          bool ctrl_pressed = keystate[SDL_SCANCODE_LCTRL] || keystate[SDL_SCANCODE_RCTRL];
+          bool shift_pressed = keystate[SDL_SCANCODE_LSHIFT] || keystate[SDL_SCANCODE_RSHIFT];
+
+          // Only handle zoom/scroll if mouse is over the deck area
+          SDL_Point mouse_pos;
+          SDL_GetMouseState(&mouse_pos.x, &mouse_pos.y);
+
+          // Calculate deck area absolute coordinates
+          SDL_Rect deck_area_absolute = {
+            main_area.x,
+            main_area.y, 
+            main_area.w - (main_area.w / 4) - 10, // Excluding preview area
+            main_area.h
+          };
+
+          if (SDL_PointInRect(&mouse_pos, &deck_area_absolute)) {
+            deck_visualizer.handle_scroll(e.wheel.y, ctrl_pressed, shift_pressed);
+          }
         }
         upload_button.update_clicked(e);
         sideboard_button.update_clicked(e);

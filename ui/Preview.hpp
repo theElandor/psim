@@ -15,22 +15,24 @@ public:
     void update_area(SDL_Rect& new_area) {
         area = new_area;
     }
-    
+    void renderBackground(){
+
+    } 
     // Render the preview for a given card
     void render(RenderedCard* card) {
-        if (!card || !font) return; 
-        // Set viewport to preview area
-        SDL_Rect original_viewport;
-        SDL_RenderGetViewport(renderer, &original_viewport);
-        SDL_RenderSetViewport(renderer, &area);
-        
-        // Draw preview background
-        SDL_Rect bg_rect = {0, 0, area.w, area.h};
-        SDL_SetRenderDrawColor(renderer, 40, 40, 40, 200);
-        SDL_RenderFillRect(renderer, &bg_rect);
-        SDL_SetRenderDrawColor(renderer, 255, 255, 255, 255);
-        SDL_RenderDrawRect(renderer, &bg_rect);
+      // Set viewport to preview area
+      SDL_Rect original_viewport;
+      SDL_RenderGetViewport(renderer, &original_viewport);
+      SDL_RenderSetViewport(renderer, &area);
+      
+      // Draw preview background
+      SDL_Rect bg_rect = {0, 0, area.w, area.h};
+      SDL_SetRenderDrawColor(renderer, 40, 40, 40, 200);
+      SDL_RenderFillRect(renderer, &bg_rect);
+      SDL_SetRenderDrawColor(renderer, 255, 255, 255, 255);
+      SDL_RenderDrawRect(renderer, &bg_rect);
 
+      if(card != nullptr){ // if a card is hovered
         // Calculate card dimensions maintaining aspect ratio
         float cardAspect = 66.0f / 88.0f; // Magic card aspect ratio
         int cardWidth = area.w - 2 * PREVIEW_MARGIN;
@@ -57,8 +59,8 @@ public:
         
         std::string cmcText = "CMC: " + std::to_string(card->game_info.cmc);
         render_text(cmcText, textColor, cardRect.y + cardRect.h + 35);
-        
-        SDL_RenderSetViewport(renderer, &original_viewport);
+      }
+      SDL_RenderSetViewport(renderer, &original_viewport);
     }
 
 private:

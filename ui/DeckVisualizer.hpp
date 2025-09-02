@@ -19,6 +19,11 @@
 #define SIDE_MARGIN 10
 #define SCROLL_BUFFER 400.0
 
+// Card size scaling constants
+#define MIN_CARD_SCALE 0.5f
+#define MAX_CARD_SCALE 3.0f
+#define CARD_SCALE_STEP 0.1f
+
 struct Column{
   std::vector<RenderedCard> cards;
   SDL_Color borderColor;
@@ -54,7 +59,7 @@ public:
   
   DeckVisualizer(SDL_Renderer* renderer, TTF_Font* font, SDL_Rect& display_area)
     : renderer(renderer), font(font), area(display_area), 
-      loading_state(LoadingState::IDLE), total_tasks(0), completed_tasks(0) {
+      loading_state(LoadingState::IDLE), total_tasks(0), completed_tasks(0), card_scale(1.3f) {
       preview_width = area.w / 4;
       update_areas();
       preview = new Preview(renderer, font, preview_area);
@@ -73,7 +78,9 @@ public:
     allCards.clear();
     hoveredCard = nullptr;
     scrollOffset = 0.0f;
+    horizontalScrollOffset = 0.0f;  // Reset horizontal scroll too
     loading_state = LoadingState::IDLE;
+    // Keep card_scale - don't reset it so user's preference persists
   }
 
   // Update areas when window is resized
@@ -90,18 +97,39 @@ public:
     return hoveredCard;
   }
   
-  // Handle mouse wheel scrolling
-  void handle_scroll(int scroll_y) {
-    float scroll_speed = 30.0f;
-    scrollOffset += scroll_y * scroll_speed;
-    
-    // Clamp scroll offset
-    clamp_scroll_offset();
+  // Handle mouse wheel scrolling with CTRL+scroll for card scaling
+  void handle_scroll(int scroll_y, bool ctrl_pressed = false, bool shift_pressed = false) {
+    if (ctrl_pressed) {
+      // Scale card size
+      if (scroll_y > 0) {
+        card_scale += CARD_SCALE_STEP;
+      } else {
+        card_scale -= CARD_SCALE_STEP;
+      }
+      
+      // Clamp card scale
+      card_scale = std::max(MIN_CARD_SCALE, std::min(MAX_CARD_SCALE, card_scale));
+      
+      // Clamp both scroll offsets since content size changed
+      clamp_scroll_offsets();
+    } else if (shift_pressed) {
+      // Horizontal scrolling
+      float scroll_speed = 30.0f;
+      horizontalScrollOffset += scroll_y * scroll_speed;
+      clamp_scroll_offsets();
+    } else {
+      // Regular vertical scrolling
+      float scroll_speed = 30.0f;
+      scrollOffset += scroll_y * scroll_speed;
+      clamp_scroll_offsets();
+    }
   }
+  
   void setMouse(int x, int y){
     mouseX = x;
     mouseY = y;
   } 
+  
   void renderDeck(std::vector<Card> &deck){
     if(!columns_initialized && loading_state == LoadingState::IDLE){
       initialize_columns_async(deck);
@@ -121,9 +149,12 @@ public:
     } else if (loading_state == LoadingState::COMPLETED || loading_state == LoadingState::ERROR) {
       // Render deck columns
       render_deck_columns();
-      
+      // Render card scale indicator if not at default size
+      if (card_scale != 1.0f) {
+        render_scale_indicator();
+      } 
       // Render preview
-      if (preview && hoveredCard) {
+      if (preview) {
         preview->render(hoveredCard);
       }
     }
@@ -144,6 +175,25 @@ private:
     preview_area.y = TOP_MARGIN;
     preview_area.w = preview_width - PREVIEW_MARGIN;
     preview_area.h = deck_area.h - TOP_MARGIN; 
+  }
+
+  void render_scale_indicator() {
+    // Show card scale in corner
+    SDL_Color text_color = {255, 255, 255, 200};
+    std::string scale_text = "Card Size: " + std::to_string((int)(card_scale * 100)) + "%";
+    
+    // Render in top-right corner of deck area
+    int text_x = deck_area.w - 120;
+    int text_y = 10;
+    
+    // Semi-transparent background
+    SDL_SetRenderDrawBlendMode(renderer, SDL_BLENDMODE_BLEND);
+    SDL_SetRenderDrawColor(renderer, 0, 0, 0, 128);
+    SDL_Rect bg_rect = {text_x - 5, text_y - 2, 110, 20};
+    SDL_RenderFillRect(renderer, &bg_rect);
+    
+    render_popup_text(scale_text, text_x, text_y, text_color, false);
+    SDL_SetRenderDrawBlendMode(renderer, SDL_BLENDMODE_NONE);
   }
 
   void render_loading_popup() {
@@ -232,24 +282,33 @@ private:
     SDL_RenderGetViewport(renderer, &original_viewport);
     SDL_RenderSetViewport(renderer, &deck_area);
     
-    int col_width = deck_area.w / num_cols;
+    // Calculate column width based on card scale (minimum spacing between columns)
+    int base_card_width = 100; // Base card width
+    int scaled_card_width = static_cast<int>(base_card_width * card_scale);
+    int col_spacing = 20; // Minimum spacing between columns
+    int col_width = scaled_card_width + col_spacing;
     
     // Reset hovered card at start of render
     hoveredCard = nullptr;
     
     for (size_t i = 0; i < num_cols; i++) {
-      cols[i].x = i * col_width;
-      render_cards(renderer, cols[i], deck_area.h, col_width, 
-                   mouseX - deck_area.x, mouseY - deck_area.y, scrollOffset);
+      int col_x = static_cast<int>(i * col_width + horizontalScrollOffset);
+      cols[i].x = col_x;
+      
+      // Only render columns that are visible
+      if (col_x + col_width > 0 && col_x < deck_area.w) {
+        render_cards(renderer, cols[i], deck_area.h, col_width, 
+                     mouseX - deck_area.x, mouseY - deck_area.y, scrollOffset);
+      }
     }
     
     SDL_RenderSetViewport(renderer, &original_viewport);
   }
 
-  // Calculate the total height needed for all cards in a column
+  // Calculate the total height needed for all cards in a column (with card scaling)
   float calculate_column_content_height(const Column& c, int col_width) {
     if (c.cards.empty()) return 0;   
-    float card_height = ((float)(col_width) / 66) * 88;
+    float card_height = ((float)(col_width) / 66) * 88 * card_scale;
     float card_offset = card_height * TITLE_PORTION; 
     // Total height = (number of cards - 1) * offset + full card height
     return (c.cards.size() - 1) * card_offset + card_height;
@@ -264,32 +323,56 @@ private:
     return maxHeight;
   }
 
-  void clamp_scroll_offset() {    
+  float get_total_content_width() {
+    if (cols.empty()) return 0;
+    
+    int base_card_width = 100;
+    int scaled_card_width = static_cast<int>(base_card_width * card_scale);
+    int col_spacing = 20;
+    int col_width = scaled_card_width + col_spacing;
+    
+    return cols.size() * col_width;
+  }
+
+  void clamp_scroll_offsets() {    
     if (cols.empty()) {
       scrollOffset = 0.0f;
+      horizontalScrollOffset = 0.0f;
       return;
     }
     
-    int col_width = deck_area.w / cols.size();
+    // Clamp vertical scroll offset
+    int base_card_width = 100;
+    int scaled_card_width = static_cast<int>(base_card_width * card_scale);
+    int col_spacing = 20;
+    int col_width = scaled_card_width + col_spacing;
+    
     float maxContentHeight = get_max_content_height(col_width);
     float viewportHeight = deck_area.h;
     
     if (maxContentHeight <= viewportHeight) {
-        // Content fits entirely in viewport - no scrolling needed
         scrollOffset = 0.0f;
-        return;
-    } 
+    } else {
+        float maxScrollUp = 0.0f;
+        float maxScrollDown = viewportHeight - maxContentHeight;
+        scrollOffset = std::max(maxScrollDown, std::min(maxScrollUp, scrollOffset));
+    }
     
-    // Calculate scroll limits
-    float maxScrollUp = 0.0f;  // Can't scroll above the top of first card
-    float maxScrollDown = viewportHeight - maxContentHeight;  // Can scroll until last card is visible
+    // Clamp horizontal scroll offset
+    float totalContentWidth = get_total_content_width();
+    float viewportWidth = deck_area.w;
     
-    // Clamp the scroll offset
-    scrollOffset = std::max(maxScrollDown, std::min(maxScrollUp, scrollOffset));
+    if (totalContentWidth <= viewportWidth) {
+        horizontalScrollOffset = 0.0f;
+    } else {
+        float maxScrollLeft = 0.0f;
+        float maxScrollRight = viewportWidth - totalContentWidth;
+        horizontalScrollOffset = std::max(maxScrollRight, std::min(maxScrollLeft, horizontalScrollOffset));
+    }
   }
 
   void render_cards(SDL_Renderer* renderer, Column &c, int win_h, int col_width, int mouseX, int mouseY, float scrollOffset){
-    // renders the cards in each column with scroll support
+    // renders the cards in each column with scroll support and card scaling
     SDL_SetRenderDrawColor(renderer,0,0,0,255); 
     float offset;
     
@@ -303,16 +386,22 @@ private:
     
     for(size_t i = 0; i < c.cards.size(); i++){
       SDL_Rect rect;
-      rect.x = c.x+PADDING/2;
-      float dyn_h;
-      rect.w = col_width-PADDING; 
-      dyn_h = ((float)rect.w/66)*88;
-      offset = dyn_h * (TITLE_PORTION);
-      rect.h = static_cast<int>(dyn_h);
+      
+      // Apply card scaling to both width and height
+      int base_card_width = 100;  // Base card width
+      int scaled_width = static_cast<int>(base_card_width * card_scale);
+      float scaled_height = ((float)scaled_width/66)*88;  // Maintain card aspect ratio
+      
+      // Center the scaled card horizontally in the column
+      rect.x = c.x + (col_width - scaled_width) / 2;
+      rect.w = scaled_width;
+      rect.h = static_cast<int>(scaled_height);
+      
+      offset = scaled_height * (TITLE_PORTION);
       rect.y = static_cast<int>(offset*i + scrollOffset);  // Apply scroll offset here
       
       // Only render if the card is visible (within the clipped area)
-      if (rect.y + rect.h > 0 && rect.y < win_h) {
+      if (rect.y + rect.h > 0 && rect.y < win_h && rect.x + rect.w > 0 && rect.x < deck_area.w) {
         SDL_RenderCopy(renderer, c.cards[i].texture, nullptr, &rect);
         
         // Check if mouse is hovering over this card (after rendering)
@@ -500,6 +589,7 @@ void process_completed_loads() {
   SDL_Rect preview_area;   // Area for preview
 
   float scrollOffset = 0.0f;
+  float horizontalScrollOffset = 0.0f;  // New horizontal scroll offset
 
   std::vector<Column> cols;
   std::vector<RenderedCard> allCards; // Store all cards for regrouping
@@ -516,4 +606,6 @@ void process_completed_loads() {
   std::atomic<size_t> total_tasks;
   std::atomic<size_t> completed_tasks;
   size_t task_counter;
+
+  float card_scale;        // Card size scaling factor
 };
