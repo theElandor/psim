@@ -1,4 +1,5 @@
 #include <SDL2/SDL_events.h>
+#include <SDL2/SDL_hints.h>
 #include <SDL2/SDL_rect.h>
 #include <iostream>
 #include <iterator>
@@ -418,6 +419,7 @@ int main() {
       SDL_Quit();
       return 1;
     }
+    SDL_SetHint(SDL_HINT_RENDER_SCALE_QUALITY, "2");
     SDL_Renderer* renderer = SDL_CreateRenderer(window, -1, SDL_RENDERER_ACCELERATED);
     if (!renderer) {
       std::cerr << "Renderer could not be created! SDL_Error: " << SDL_GetError() << "\n";

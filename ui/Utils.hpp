@@ -8,21 +8,30 @@
 
 
 SDL_Texture* loadTextureFromMemory(SDL_Renderer* renderer, const std::vector<unsigned char>& imageData) {
-  /*
-   * AI generated. Returns a texture object given a buffer of data.
-   */
   SDL_RWops* rw = SDL_RWFromConstMem(imageData.data(), imageData.size());
   if (!rw) {
-    std::cerr << "SDL_RWFromConstMem failed: " << SDL_GetError() << "\n";
-    return nullptr;
+      std::cerr << "SDL_RWFromConstMem failed: " << SDL_GetError() << "\n";
+      return nullptr;
   }
-  SDL_Surface* surface = IMG_Load_RW(rw, 1); // 1 = SDL frees the RWops
+  
+  SDL_Surface* surface = IMG_Load_RW(rw, 1);
   if (!surface) {
-    std::cerr << "IMG_Load_RW failed: " << IMG_GetError() << "\n";
-    return nullptr;
+      std::cerr << "IMG_Load_RW failed: " << IMG_GetError() << "\n";
+      return nullptr;
   }
-  SDL_Texture* texture = SDL_CreateTextureFromSurface(renderer, surface);
+  
+  // Convert surface to a consistent high-quality format
+  SDL_Surface* optimizedSurface = SDL_ConvertSurfaceFormat(surface, SDL_PIXELFORMAT_RGBA8888, 0);
   SDL_FreeSurface(surface);
+  
+  if (!optimizedSurface) {
+      std::cerr << "Surface optimization failed: " << SDL_GetError() << "\n";
+      return nullptr;
+  }
+  
+  SDL_Texture* texture = SDL_CreateTextureFromSurface(renderer, optimizedSurface);
+  SDL_FreeSurface(optimizedSurface);
+  
   return texture;
 }
 

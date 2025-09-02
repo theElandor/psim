@@ -59,7 +59,7 @@ public:
   
   DeckVisualizer(SDL_Renderer* renderer, TTF_Font* font, SDL_Rect& display_area)
     : renderer(renderer), font(font), area(display_area), 
-      loading_state(LoadingState::IDLE), total_tasks(0), completed_tasks(0), card_scale(1.3f) {
+      loading_state(LoadingState::IDLE), total_tasks(0), completed_tasks(0), card_scale(2.0f) {
       preview_width = area.w / 4;
       update_areas();
       preview = new Preview(renderer, font, preview_area);
@@ -149,6 +149,7 @@ public:
     } else if (loading_state == LoadingState::COMPLETED || loading_state == LoadingState::ERROR) {
       // Render deck columns
       render_deck_columns();
+       
       // Render card scale indicator if not at default size
       if (card_scale != 1.0f) {
         render_scale_indicator();
