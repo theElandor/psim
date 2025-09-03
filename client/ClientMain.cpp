@@ -380,6 +380,15 @@ SDL_Rect get_quit_button_area(SDL_Rect main_area){
   button_area.h = BUTTON_HEIGHT;
   return button_area;
 }
+SDL_Rect get_recent_decks_area(SDL_Rect main_area){
+  SDL_Rect button_area;
+  SDL_Rect quit_button_area = get_quit_button_area(main_area);
+  button_area.x = quit_button_area.x - BUTTON_WIDTH - BUTTON_MARGIN;
+  button_area.y = quit_button_area.y;
+  button_area.w = BUTTON_WIDTH;
+  button_area.h = BUTTON_HEIGHT;
+  return button_area;
+}
 int main() {
   int window_w = 1000;
   int window_h = 700;
@@ -389,6 +398,7 @@ int main() {
   SDL_Rect upload_button_area = get_upload_button_area(main_area); 
   SDL_Rect sideboard_button_area = get_sideboard_button_area(main_area);
   SDL_Rect quit_button_area = get_quit_button_area(main_area);
+  SDL_Rect recent_decks_area = get_recent_decks_area(main_area);
   try {
     GameClient client;
     // Initialize SDL and SDL_ttf
@@ -453,6 +463,7 @@ int main() {
     Button upload_button(upload_button_area,"Upload Deck");
     Button sideboard_button(sideboard_button_area, "Sideboard");
     Button quit_button(quit_button_area, "Quit");
+    Button recent_decks_button(recent_decks_area, "Recent");
     // ==========================================================
     /* Upload button callback. Depends on tinyfiledialogs. */
     upload_button.setOnClick([&client, &message_log]() {
@@ -500,6 +511,7 @@ int main() {
       deck_visualizer.setMouse(mouseX, mouseY);
       upload_button.setMouse(mouseX, mouseY);
       quit_button.setMouse(mouseX, mouseY);
+      recent_decks_button.setMouse(mouseX, mouseY);
       sideboard_button.setMouse(mouseX, mouseY);
 
       while (SDL_PollEvent(&e) != 0) { // polling events from SDL
@@ -547,9 +559,12 @@ int main() {
           upload_button_area = get_upload_button_area(main_area);
           sideboard_button_area = get_sideboard_button_area(main_area);
           quit_button_area = get_quit_button_area(main_area);
+          recent_decks_area = get_recent_decks_area(main_area);
+
           upload_button.setArea(upload_button_area);
           sideboard_button.setArea(sideboard_button_area);
           quit_button.setArea(quit_button_area);
+          recent_decks_button.setArea(recent_decks_area);
           // =========================================================
         }
         else if(e.type == SDL_MOUSEWHEEL){
@@ -576,6 +591,7 @@ int main() {
         upload_button.update_clicked(e);
         sideboard_button.update_clicked(e);
         quit_button.update_clicked(e);
+        recent_decks_button.update_clicked(e);
         text_input.handle_event(e);
       } 
       // Process network messages
@@ -607,6 +623,8 @@ int main() {
       upload_button.render(renderer, nullptr);
       quit_button.render(renderer, font);
       sideboard_button.render(renderer, font);
+      recent_decks_button.render(renderer, font);
+
       if (uploadTexture){
         renderIcon(renderer, uploadTexture, upload_button_area);
       }

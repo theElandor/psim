@@ -106,10 +106,8 @@ public:
       } else {
         card_scale -= CARD_SCALE_STEP;
       }
-      
       // Clamp card scale
       card_scale = std::max(MIN_CARD_SCALE, std::min(MAX_CARD_SCALE, card_scale));
-      
       // Clamp both scroll offsets since content size changed
       clamp_scroll_offsets();
     } else if (shift_pressed) {
@@ -134,10 +132,8 @@ public:
     if(!columns_initialized && loading_state == LoadingState::IDLE){
       initialize_columns_async(deck);
     }
-    
     // Process any completed card loads
     process_completed_loads();
-    
     // Save current viewport/clip state
     SDL_Rect original_viewport;
     SDL_RenderGetViewport(renderer, &original_viewport);
@@ -147,9 +143,7 @@ public:
     if (loading_state == LoadingState::LOADING) {
       render_loading_popup();
     } else if (loading_state == LoadingState::COMPLETED || loading_state == LoadingState::ERROR) {
-      // Render deck columns
       render_deck_columns();
-       
       // Render card scale indicator if not at default size
       if (card_scale != 1.0f) {
         render_scale_indicator();
@@ -159,7 +153,6 @@ public:
         preview->render(hoveredCard);
       }
     }
-    
     SDL_RenderSetViewport(renderer, &original_viewport);
   }
 
@@ -170,7 +163,6 @@ private:
     deck_area.y = TOP_MARGIN;
     deck_area.w = area.w - preview_width - SIDE_MARGIN;
     deck_area.h = area.h - TOP_MARGIN;
-    
     // Calculate preview area (right side)
     preview_area.x = deck_area.w + SIDE_MARGIN;
     preview_area.y = TOP_MARGIN;
@@ -412,12 +404,22 @@ private:
         }
       }
     }
-    
     // Reset clipping
     SDL_RenderSetClipRect(renderer, nullptr);
   }
 
   void initialize_columns_async(std::vector<Card>& deck) {
+    /*
+     * Function called only once (at the first render call). It 
+     * creates tasks that will be executed by the loading thread.
+     * This is done because in SDL the main thread always needs to 
+     * render UI, otherwise it will be detected as "non responding"
+     * by most OSs.
+     * Tasks are placed in a shared queue thanks to a mutex that makes
+     * the insertion safe (since the queue is used by both this function and
+     * the background thread).
+     * ML
+    */
     size_t cards_per_col = 16;
     if(deck.size() <= 15){
       // then we are rendering sideboard
@@ -427,11 +429,9 @@ private:
     total_tasks = 0;
     completed_tasks = 0;
     task_counter = 0;
-    
     // Clear previous data
     cols.clear();
     allCards.clear();
-    
     // Group cards by name and count
     std::map<std::string, int> cardCounts;
     for (const auto& card : deck) {
@@ -459,7 +459,6 @@ private:
       task.copies = pair.second;
       task.column_index = current_column;
       task.task_id = task_counter++;
-      
       // Add placeholder cards to column
       for (int i = 0; i < pair.second; i++) {
         RenderedCard placeholder;
@@ -476,23 +475,29 @@ private:
         total_tasks++;
       }
     }
-    
     // Add the last column
     if (!col.cards.empty()) {
       cols.push_back(col);
     }
-    
     // Start background thread
     stop_loading();  // Stop any existing thread
     loading_thread = std::thread(&DeckVisualizer::load_cards_background, this);
   }
   
 void load_cards_background() {
+  /*
+   * This function is used in a background thread called as the 
+   * client first calls the render() function. Pops tasks 
+   * from a shared queue which is filled in the main thread
+   * with all the cards that need to be loaded. It leverages
+   * the Scryfall module to either download cards using the API
+   * or just load them from disk if they are available in the data folder.
+   * ML
+  */
   ScryfallAPI api; 
   while (true) {
     CardLoadTask task;
     bool has_task = false;
-    
     {
       std::lock_guard<std::mutex> lock(task_mutex);
       if (!pending_tasks.empty()) {
@@ -501,22 +506,18 @@ void load_cards_background() {
           has_task = true;
       }
     }
-    
     if (!has_task) {
       loading_state = LoadingState::COMPLETED;
       columns_initialized = true;
       break;
     }
-    
     try {
       // Load card data
       std::string card_info = api.getCardByName(task.card_info.title);
       std::string url = api.getCardImageURL(card_info);
       int cmc = api.getCardCmc(card_info);
-      
       // Download image data (not texture)
       auto imageData = api.downloadImageCached(url);
-      
       // Create loaded card with image data
       LoadedCard loaded_card;
       loaded_card.title = task.card_info.title;
@@ -525,33 +526,34 @@ void load_cards_background() {
       loaded_card.copies = task.copies;
       loaded_card.column_index = task.column_index;
       loaded_card.task_id = task.task_id;
-      
       {
           std::lock_guard<std::mutex> lock(completed_mutex);
           completed_loads.push(loaded_card);
       }
-      
       completed_tasks++;
-        
     } catch (const std::exception& e) {
         std::cerr << "Error loading card " << task.card_info.title << ": " << e.what() << std::endl;
         completed_tasks++;
     }
   }
 }
-  
+ 
 void process_completed_loads() {
+  /*
+   * This function retrieves cards that have been 
+   * successfully loaded in the background thread.
+   * It creates the texture and fills the card information
+   * so that it can be rendered in the main thread.
+   * ML
+  */
   std::lock_guard<std::mutex> lock(completed_mutex);
-  
   while (!completed_loads.empty()) {
     LoadedCard loaded = completed_loads.front();
     completed_loads.pop();
-    
     // Create texture in main thread
     SDL_Texture* texture = loadTextureFromMemory(renderer, loaded.image_data);
-    
     if (texture && loaded.column_index < cols.size()) {
-        // Update cards with matching name
+      // Update cards with matching name
       int updated = 0;
       for (auto& card : cols[loaded.column_index].cards) {
         if (card.game_info.title == loaded.title && updated < loaded.copies) {
