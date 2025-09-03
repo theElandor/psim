@@ -190,61 +190,51 @@ private:
   }
 
   void render_loading_popup() {
-    // Calculate popup dimensions
+    // Calculate popup dimensios
     int popup_w = 300;
     int popup_h = 150;
     int popup_x = (area.w - popup_w) / 2;
     int popup_y = (area.h - popup_h) / 2;
-    
     // Draw semi-transparent overlay
     SDL_SetRenderDrawBlendMode(renderer, SDL_BLENDMODE_BLEND);
     SDL_SetRenderDrawColor(renderer, 0, 0, 0, 128);
     SDL_Rect overlay = {0, 0, area.w, area.h};
     SDL_RenderFillRect(renderer, &overlay);
-    
     // Draw popup background
     SDL_SetRenderDrawColor(renderer, 60, 60, 60, 255);
     SDL_Rect popup_bg = {popup_x, popup_y, popup_w, popup_h};
     SDL_RenderFillRect(renderer, &popup_bg);
-    
     // Draw popup border
     SDL_SetRenderDrawColor(renderer, 200, 200, 200, 255);
     SDL_RenderDrawRect(renderer, &popup_bg);
-    
     // Draw loading text
     if (font) {
       SDL_Color text_color = {255, 255, 255, 255};
       std::string loading_text = "Loading cards...";
       render_popup_text(loading_text, popup_x + popup_w/2, popup_y + 40, text_color, true);
-      
       // Draw progress
       if (total_tasks > 0) {
         float progress = (float)completed_tasks / total_tasks;
         std::string progress_text = std::to_string(completed_tasks) + "/" + std::to_string(total_tasks);
         render_popup_text(progress_text, popup_x + popup_w/2, popup_y + 70, text_color, true);
-        
         // Draw progress bar
         int bar_w = popup_w - 40;
         int bar_h = 20;
         int bar_x = popup_x + 20;
         int bar_y = popup_y + 90;
-        
         // Progress bar background
         SDL_SetRenderDrawColor(renderer, 40, 40, 40, 255);
         SDL_Rect bar_bg = {bar_x, bar_y, bar_w, bar_h};
         SDL_RenderFillRect(renderer, &bar_bg);
-        
         // Progress bar fill
         SDL_SetRenderDrawColor(renderer, 0, 150, 0, 255);
         SDL_Rect bar_fill = {bar_x, bar_y, (int)(bar_w * progress), bar_h};
         SDL_RenderFillRect(renderer, &bar_fill);
-        
         // Progress bar border
         SDL_SetRenderDrawColor(renderer, 200, 200, 200, 255);
         SDL_RenderDrawRect(renderer, &bar_bg);
       }
-    }
-    
+    } 
     SDL_SetRenderDrawBlendMode(renderer, SDL_BLENDMODE_NONE);
   }
   

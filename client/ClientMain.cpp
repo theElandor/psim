@@ -154,21 +154,50 @@ public:
 
   bool is_connected() const { return connected; }
 
-  std::string open_deck(const std::string& path) {
+std::string open_deck(const std::string& path) {
     try {
       std::ifstream is(path);
       if (!is) {
           return "";
-      }
-      
+      } 
       std::string contents((std::istreambuf_iterator<char>(is)),
                          std::istreambuf_iterator<char>());
       is.close();
+      // Read existing recent decks
+      std::vector<std::string> recent_decks;
+      std::ifstream recent_file("data/recent.txt");
+      std::string line;
+      
+      while (std::getline(recent_file, line)) {
+          if (!line.empty()) {
+              recent_decks.push_back(line);
+          }
+      }
+      recent_file.close();
+      // Remove the current path if it already exists to avoid duplicates
+      recent_decks.erase(std::remove(recent_decks.begin(), recent_decks.end(), path), 
+                        recent_decks.end());
+      // Add current path to the beginning
+      recent_decks.insert(recent_decks.begin(), path);
+      // Keep only the last 3 decks
+      if (recent_decks.size() > 3) {
+          recent_decks.resize(3);
+      }
+      // Write back to file
+      std::ofstream os("data/recent.txt");
+      if (os.is_open()) {
+          for (const auto& deck_path : recent_decks) {
+              os << deck_path << std::endl;
+          }
+          os.close();
+      } else {
+          push_message("Error in opening recent decks file.");
+      }
       return contents;
-    } catch (...) {
+  } catch (...) {
       return "";
-    }
   }
+}
 
   Command create_command_from_input(CommandCode code, const std::string& param = "") {
     Command cmd;

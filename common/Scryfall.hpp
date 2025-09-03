@@ -21,7 +21,7 @@ private:
     CURL* curlJson;
     CURL* curlImage;
     std::string baseUrl = "https://api.scryfall.com";
-    std::string cacheDir = "../data";
+    std::string cacheDir = "data";
     std::string jsonDir;
     std::string imageDir;
 
