@@ -30,13 +30,14 @@ Run a sample client with:
 ```
 ./client_app
 ```
-You can use the buttons to upload a deck, toggle the sideboard visualization, and quit th client.
+You can use the buttons to upload a deck, toggle the sideboard visualization, or upload a recent deck.
 
-![screenshot](client.png)
+![screenshot](client1.png)
+![screenshot](client2.png)
+![screenshot](client3.png)
 
 # Features to add
 ## Deck visualizer
 + Add the possibility of dragging cards around;
-+ Add a left panel with recent decks;
 + Don't re-initialize columns for sideboard view toggle for faster switch;
-
++ Add a "ready to play" button;

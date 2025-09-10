@@ -195,11 +195,13 @@ private:
     int popup_h = 150;
     int popup_x = (area.w - popup_w) / 2;
     int popup_y = (area.h - popup_h) / 2;
+    
     // Draw semi-transparent overlay
     SDL_SetRenderDrawBlendMode(renderer, SDL_BLENDMODE_BLEND);
     SDL_SetRenderDrawColor(renderer, 0, 0, 0, 128);
     SDL_Rect overlay = {0, 0, area.w, area.h};
     SDL_RenderFillRect(renderer, &overlay);
+    
     // Draw popup background
     SDL_SetRenderDrawColor(renderer, 60, 60, 60, 255);
     SDL_Rect popup_bg = {popup_x, popup_y, popup_w, popup_h};
@@ -207,6 +209,7 @@ private:
     // Draw popup border
     SDL_SetRenderDrawColor(renderer, 200, 200, 200, 255);
     SDL_RenderDrawRect(renderer, &popup_bg);
+    
     // Draw loading text
     if (font) {
       SDL_Color text_color = {255, 255, 255, 255};

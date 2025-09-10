@@ -24,6 +24,7 @@
 #include "Messages.hpp"
 #include "tinyfiledialogs.h"
 #include "Utils.hpp"
+#include "RecentDecksPopup.hpp"
 
 #define BUTTON_AREA_H 50
 
@@ -169,9 +170,9 @@ std::string open_deck(const std::string& path) {
       std::string line;
       
       while (std::getline(recent_file, line)) {
-          if (!line.empty()) {
-              recent_decks.push_back(line);
-          }
+        if (!line.empty()) {
+            recent_decks.push_back(line);
+        }
       }
       recent_file.close();
       // Remove the current path if it already exists to avoid duplicates
@@ -186,18 +187,34 @@ std::string open_deck(const std::string& path) {
       // Write back to file
       std::ofstream os("data/recent.txt");
       if (os.is_open()) {
-          for (const auto& deck_path : recent_decks) {
-              os << deck_path << std::endl;
-          }
-          os.close();
+        for (const auto& deck_path : recent_decks) {
+            os << deck_path << std::endl;
+        }
+        os.close();
       } else {
-          push_message("Error in opening recent decks file.");
+        push_message("Error in opening recent decks file.");
       }
       return contents;
   } catch (...) {
       return "";
   }
 }
+
+  // New function to load recent decks from file
+  std::vector<std::string> load_recent_decks() {
+    std::vector<std::string> recent_decks;
+    std::ifstream recent_file("data/recent.txt");
+    std::string line;
+    
+    while (std::getline(recent_file, line)) {
+      if (!line.empty()) {
+        recent_decks.push_back(line);
+      }
+    }
+    recent_file.close();
+    
+    return recent_decks;
+  }
 
   Command create_command_from_input(CommandCode code, const std::string& param = "") {
     Command cmd;
@@ -312,12 +329,12 @@ private:
     
   void handle_disconnect() {
     if (connected) {
-        connected = false;
-        push_message("Disconnected from server");
-        try {
-            socket.close();
-        } catch (...) {}
-        io_context.stop();
+      connected = false;
+      push_message("Disconnected from server");
+      try {
+          socket.close();
+      } catch (...) {}
+      io_context.stop();
     }
   }
 };
@@ -489,10 +506,13 @@ int main() {
     TextInput text_input;
     MessageLog message_log;
     DeckVisualizer deck_visualizer(renderer, font, main_area);
+    RecentDecksPopup recent_decks_popup(renderer, font);
     Button upload_button(upload_button_area,"Upload Deck");
     Button sideboard_button(sideboard_button_area, "Sideboard");
     Button quit_button(quit_button_area, "Quit");
     Button recent_decks_button(recent_decks_area, "Recent");
+    std::vector<Button*> buttons = {&upload_button, &sideboard_button,
+                              &quit_button, &recent_decks_button};
     // ==========================================================
     /* Upload button callback. Depends on tinyfiledialogs. */
     upload_button.setOnClick([&client, &message_log]() {
@@ -525,6 +545,28 @@ int main() {
       deck_visualizer.reset_for_new_deck();
       render_side = !render_side;
     });
+    
+    // When we click the button we load the file and render
+    // the popup window.
+    recent_decks_button.setOnClick([&client, &recent_decks_popup](){
+      std::vector<std::string> recent_decks = client.load_recent_decks();
+      recent_decks_popup.show(recent_decks);
+    });
+    // Once the deck is selected we create the command and send it
+    recent_decks_popup.set_on_deck_selected([&client, &message_log](const std::string& deck_path) {
+      Command cmd = client.create_command_from_input(CommandCode::UploadDeck, deck_path);
+      if (cmd.code != CommandCode::Invalid) {
+        client.send_command(cmd);
+        message_log.add_message("Loading deck: " + deck_path);
+      } else {
+        message_log.add_message("Failed to load deck: " + deck_path);
+      }
+    });
+    
+    recent_decks_popup.set_on_cancelled([&message_log]() {
+      message_log.add_message("Recent deck selection cancelled");
+    });
+    
     // Connect to server
     client.connect_to_server("127.0.0.1", 5000);
     message_log.add_message("Connecting to server...");
@@ -536,17 +578,72 @@ int main() {
     while (!quit) {
       // Process events
       int mouseX, mouseY;
-      SDL_GetMouseState(&mouseX, &mouseY);
+      SDL_GetMouseState(&mouseX, &mouseY); 
+      // Always update mouse positions for all UI elements
       deck_visualizer.setMouse(mouseX, mouseY);
-      upload_button.setMouse(mouseX, mouseY);
-      quit_button.setMouse(mouseX, mouseY);
-      recent_decks_button.setMouse(mouseX, mouseY);
-      sideboard_button.setMouse(mouseX, mouseY);
-
+      for(auto &b:buttons){
+        b->setMouse(mouseX, mouseY);
+      }
       while (SDL_PollEvent(&e) != 0) { // polling events from SDL
         if (e.type == SDL_QUIT) {
-            quit = true;
-        } else if (e.type == SDL_MOUSEBUTTONDOWN) {
+          quit = true;
+        }
+        
+        bool popup_handled_event = false;
+        
+        // Handle popup events first (if visible)
+        if (recent_decks_popup.visible()) {
+          if (e.type == SDL_MOUSEBUTTONDOWN || e.type == SDL_MOUSEMOTION) {
+            SDL_Point mouse_pos = {0, 0};
+            if (e.type == SDL_MOUSEBUTTONDOWN) {
+              mouse_pos.x = e.button.x;
+              mouse_pos.y = e.button.y;
+            } else {
+              mouse_pos.x = e.motion.x;
+              mouse_pos.y = e.motion.y;
+            }
+            
+            // Calculate actual popup rect (dynamic sizing)
+            int popup_width = 500;
+            int popup_height = 400;
+            int title_height = 40;
+            int item_height = 40;
+            int padding = 30;
+            
+            std::vector<std::string> recent_decks = client.load_recent_decks();
+            int content_height = recent_decks.empty() ? 60 : recent_decks.size() * item_height;
+            int button_area_height = 60;
+            int total_height = title_height + content_height + button_area_height + (2 * padding);
+            
+            popup_height = std::min(window_h - 40, total_height);
+            popup_width = std::max(400, std::min(600, window_w - 40));
+            
+            SDL_Rect popup_rect = {
+              (window_w - popup_width) / 2,
+              (window_h - popup_height) / 2,
+              popup_width,
+              popup_height
+            };
+            
+            // If mouse event is within popup bounds, let popup handle it
+            if (SDL_PointInRect(&mouse_pos, &popup_rect)) {
+              popup_handled_event = true;
+            }
+          } else if (e.type == SDL_KEYDOWN) {
+            // Popup always handles keyboard events when visible
+            popup_handled_event = true;
+          }
+          
+          recent_decks_popup.handle_event(e, window_w, window_h);
+          
+          // If popup handled the event, skip normal UI handling
+          if (popup_handled_event) {
+            continue;
+          }
+        }
+        
+        // Normal event handling (when popup is not visible or didn't handle the event)
+        if (e.type == SDL_MOUSEBUTTONDOWN) {
             // Toggle text input focus
           SDL_Point mouse_pos = {e.button.x, e.button.y};
           SDL_Rect input_rect = {MARGIN, window_h- input_h - MARGIN, 
@@ -634,6 +731,8 @@ int main() {
       // Clear screen
       SDL_SetRenderDrawColor(renderer, 40, 44, 52, 255);
       SDL_RenderClear(renderer); 
+      
+      // Always render normal UI
       // Draw game area (top section)
       SDL_SetRenderDrawColor(renderer, 30, 30, 30, 255);
       SDL_Rect game_rect = {0, 0, window_w, window_h - console_h};
@@ -704,10 +803,12 @@ int main() {
       // Draw help text
       render_text(renderer, font, "Commands: upload, quit", 
                MARGIN, 10, {200, 200, 200, 255});
-   
+      // Always render floating window on top if visible (as a floating window)
+      if (recent_decks_popup.visible()) {
+        recent_decks_popup.render(window_w, window_h);
+      }
       // Present renderer
       SDL_RenderPresent(renderer);
-      
       // Cap frame rate
       SDL_Delay(16);
     }
@@ -726,6 +827,5 @@ int main() {
 } catch (std::exception& e) {
     std::cerr << "Client exception: " << e.what() << "\n";
 }
-
 return 0;
 }
